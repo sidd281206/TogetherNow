@@ -63,7 +63,7 @@ export async function signupAction(
 
   const supabase = await createClient()
 
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
@@ -81,6 +81,13 @@ export async function signupAction(
       errors: {
         general: [error.message],
       },
+    }
+  }
+
+  // If email confirmation is required, session will be null
+  if (data.user && !data.session) {
+    return {
+      message: 'Signup successful! Please check your email to confirm your account.',
     }
   }
 
@@ -112,7 +119,7 @@ export async function loginAction(
   if (error) {
     return {
       errors: {
-        general: ['Invalid email or password. Please try again.'],
+        general: [error.message],
       },
     }
   }
@@ -126,4 +133,27 @@ export async function logoutAction(): Promise<void> {
   const supabase = await createClient()
   await supabase.auth.signOut()
   redirect('/auth/login')
+}
+
+// ─── Google OAuth ─────────────────────────────────────────────────────────────
+
+export async function signInWithGoogleAction(): Promise<void> {
+  const supabase = await createClient()
+  
+  // The route to redirect to after successful sign-in
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'}/auth/callback`,
+    },
+  })
+
+  if (error) {
+    console.error('Error logging in with Google:', error.message)
+    redirect('/auth/error')
+  }
+  
+  if (data.url) {
+    redirect(data.url)
+  }
 }

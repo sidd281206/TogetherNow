@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { logoutAction } from '@/app/actions/auth'
 import type { Metadata } from 'next'
+import VolunteerDashboard from '@/components/ui/VolunteerDashboard'
+import OrganizationDashboard from '@/components/ui/OrganizationDashboard'
 
 export const metadata: Metadata = {
   title: 'Dashboard — TogetherNow',
@@ -61,16 +63,11 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        <div className="dashboard-info-card">
-          <p className="dashboard-info-title">🚧 Phase 3 coming soon</p>
-          <p className="dashboard-info-body">
-            Your dashboard is being built. Opportunities, events, attendance
-            tracking, and your impact feed will appear here in Phase 3.
-          </p>
-          <p className="dashboard-info-email">
-            Logged in as: <strong>{user.email}</strong>
-          </p>
-        </div>
+        {role === 'organization' ? (
+          <OrganizationDashboard />
+        ) : (
+          <VolunteerDashboard />
+        )}
       </main>
     </div>
   )
