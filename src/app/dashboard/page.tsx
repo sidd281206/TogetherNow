@@ -4,6 +4,7 @@ import { logoutAction } from '@/app/actions/auth'
 import type { Metadata } from 'next'
 import VolunteerDashboard from '@/components/ui/VolunteerDashboard'
 import OrganizationDashboard from '@/components/ui/OrganizationDashboard'
+import { Logo } from '@/components/ui/Logo'
 
 export const metadata: Metadata = {
   title: 'Dashboard — TogetherNow',
@@ -39,7 +40,7 @@ export default async function DashboardPage() {
     <div className="dashboard-shell">
       <header className="dashboard-header">
         <div className="dashboard-logo">
-          <span>🤝</span>
+          <Logo className="logo-svg" />
           <span className="dashboard-logo-text">TogetherNow</span>
         </div>
         <form action={logoutAction}>

@@ -3,6 +3,7 @@
 import { useActionState } from 'react'
 import Link from 'next/link'
 import { loginAction, signInWithGoogleAction, type AuthState } from '@/app/actions/auth'
+import { Logo } from '@/components/ui/Logo'
 
 const initialState: AuthState = null
 
@@ -15,7 +16,7 @@ export default function LoginPage() {
       <div className="auth-hero">
         <div className="auth-hero-content">
           <div className="auth-logo">
-            <span className="auth-logo-icon">🤝</span>
+            <Logo className="logo-svg" />
             <span className="auth-logo-text">TogetherNow</span>
           </div>
           <h1 className="auth-hero-title">

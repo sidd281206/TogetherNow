@@ -15,29 +15,36 @@
 /* ── Navbar ──────────────────────────────────────────────── */
 .landing-navbar {
   position: fixed;
-  top: 0;
-  width: 100%;
+  top: 1.25rem;
+  width: 90%;
+  left: 5%;
   z-index: 50;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.25rem 5%;
-  background: rgba(10, 10, 18, 0.6);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 1rem 2rem;
+  background: var(--auth-surface);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.08);
+  border-radius: 9999px;
   transition: all 0.3s ease;
+  border: 1px solid var(--auth-border);
 }
 
 .landing-logo {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
   font-size: 1.2rem;
   font-weight: 800;
-  color: #fff;
+  color: var(--auth-text);
   text-decoration: none;
   letter-spacing: -0.02em;
+}
+
+.logo-svg {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
 }
 
 .landing-nav-actions {
@@ -60,9 +67,10 @@
 }
 
 .landing-btn-secondary:hover {
-  border-color: rgba(139,92,246,0.5);
-  background: rgba(139,92,246,0.1);
-  color: #fff;
+  border-color: var(--auth-accent);
+  background: var(--auth-surface-2);
+  color: var(--auth-text);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .landing-btn-primary {
@@ -70,18 +78,18 @@
   font-size: 0.85rem;
   font-weight: 600;
   color: #fff;
-  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
+  background: var(--auth-accent);
   border-radius: 99px;
   border: none;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(124,58,237,0.3);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
   transition: all 0.2s ease;
   text-decoration: none;
 }
 
 .landing-btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(124,58,237,0.4);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
 }
 
 /* ── Hero Section ────────────────────────────────────────── */
@@ -118,14 +126,14 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.4rem 1rem;
-  background: rgba(139,92,246,0.1);
-  border: 1px solid rgba(139,92,246,0.3);
+  background: var(--auth-surface-2);
   border-radius: 99px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: #a78bfa;
+  color: var(--auth-accent);
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .landing-hero-title {
@@ -133,14 +141,11 @@
   font-weight: 800;
   line-height: 1.1;
   letter-spacing: -0.04em;
-  color: #fff;
+  color: var(--auth-text);
 }
 
 .landing-hero-title-highlight {
-  background: linear-gradient(90deg, #a78bfa, #60a5fa);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--auth-accent);
 }
 
 .landing-hero-subtitle {
@@ -177,7 +182,7 @@
 .landing-section-title {
   font-size: 2.5rem;
   font-weight: 800;
-  color: #fff;
+  color: var(--auth-text);
   letter-spacing: -0.03em;
   margin-bottom: 1rem;
 }
@@ -198,31 +203,29 @@
 }
 
 .landing-feature-card {
-  background: rgba(22, 22, 42, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 24px;
+  background: var(--auth-surface);
+  border-radius: 8px;
   padding: 2.5rem;
   transition: all 0.3s ease;
-  backdrop-filter: blur(12px);
   position: relative;
   overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
 }
 
 .landing-feature-card::before {
   content: "";
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(139,92,246,0.5), transparent);
+  height: 4px;
+  background: var(--auth-accent);
   opacity: 0;
   transition: opacity 0.3s ease;
 }
 
 .landing-feature-card:hover {
   transform: translateY(-5px);
-  background: rgba(22, 22, 42, 0.6);
-  border-color: rgba(139,92,246,0.2);
-  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+  background: var(--auth-surface-2);
+  box-shadow: 0 10px 20px rgba(0,0,0,0.5);
 }
 
 .landing-feature-card:hover::before {
@@ -232,21 +235,21 @@
 .landing-feature-icon {
   width: 54px;
   height: 54px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(124,58,237,0.1) 0%, rgba(79,70,229,0.1) 100%);
+  border-radius: 8px;
+  background: var(--auth-surface-2);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.5rem;
   margin-bottom: 1.5rem;
-  border: 1px solid rgba(139,92,246,0.2);
-  color: #a78bfa;
+  color: var(--auth-accent);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 .landing-feature-title {
   font-size: 1.25rem;
   font-weight: 700;
-  color: #fff;
+  color: var(--auth-text);
   margin-bottom: 0.75rem;
 }
 
@@ -256,19 +259,30 @@
   line-height: 1.6;
 }
 
-/* ── Footer ────────────────────────────────────────────── */
 .landing-footer {
   padding: 3rem 5%;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--auth-surface);
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-top: auto;
   position: relative;
   z-index: 10;
+  box-shadow: 0 -4px 6px rgba(0,0,0,0.3);
 }
 
 .landing-footer-text {
   font-size: 0.85rem;
   color: var(--auth-text-muted);
+}
+
+/* ── Responsive (landing-specific overrides) ─────────────── */
+@media (max-width: 768px) {
+  .landing-footer {
+    flex-direction: column;
+    gap: 0.75rem;
+    text-align: center;
+    padding: 2rem 5%;
+    box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.06);
+  }
 }

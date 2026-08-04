@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import { Logo } from '@/components/ui/Logo'
 
 export default async function Navbar() {
   const supabase = await createClient()
@@ -8,7 +9,7 @@ export default async function Navbar() {
   return (
     <nav className="landing-navbar">
       <Link href="/" className="landing-logo">
-        <span>🤝</span>
+        <Logo className="logo-svg" />
         <span>TogetherNow</span>
       </Link>
       <div className="landing-nav-actions">
