@@ -1,27 +1,24 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { logoutAction } from '@/app/actions/auth'
 import type { Metadata } from 'next'
-import VolunteerDashboard from '@/components/ui/VolunteerDashboard'
-import OrganizationDashboard from '@/components/ui/OrganizationDashboard'
-import { Logo } from '@/components/ui/Logo'
+import DashboardClient from './DashboardClient'
 
 export const metadata: Metadata = {
-  title: 'Dashboard — TogetherNow',
+  title: 'Home & Opportunities — TogetherNow',
 }
 
-const ROLE_LABELS: Record<string, string> = {
+export const ROLE_LABELS: Record<string, string> = {
   volunteer:    'Volunteer',
   organization: 'Organization',
   donor:        'Donor',
   admin:        'Admin',
 }
 
-const ROLE_COLORS: Record<string, string> = {
-  volunteer:    'badge-volunteer',
-  organization: 'badge-org',
-  donor:        'badge-donor',
-  admin:        'badge-admin',
+export const ROLE_COLORS: Record<string, string> = {
+  volunteer:    'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  organization: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300',
+  donor:        'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+  admin:        'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300',
 }
 
 export default async function DashboardPage() {
@@ -29,47 +26,73 @@ export default async function DashboardPage() {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Extra safety: middleware should catch this, but double-check here
   if (!user) redirect('/auth/login')
 
-  const fullName = user.user_metadata?.full_name ?? user.email ?? 'Friend'
   const role: string = user.user_metadata?.role ?? 'volunteer'
-  const firstName = fullName.split(' ')[0]
 
-  return (
-    <div className="dashboard-shell">
-      <header className="dashboard-header">
-        <div className="dashboard-logo">
-          <Logo className="logo-svg" />
-          <span className="dashboard-logo-text">TogetherNow</span>
-        </div>
-        <form action={logoutAction}>
-          <button type="submit" id="logout-btn" className="dashboard-logout-btn">
-            Sign out
-          </button>
-        </form>
-      </header>
+  let isNewUser = false
+  let completionPercentage = 100
+  const missingFields: string[] = []
 
-      <main className="dashboard-main">
-        <div className="dashboard-welcome-card">
-          <div className="dashboard-avatar" aria-hidden="true">
-            {firstName[0]?.toUpperCase()}
-          </div>
-          <div>
-            <p className="dashboard-greeting">Welcome back 👋</p>
-            <h1 className="dashboard-name">{firstName}</h1>
-            <span className={`dashboard-badge ${ROLE_COLORS[role] ?? 'badge-volunteer'}`}>
-              {ROLE_LABELS[role] ?? 'Volunteer'}
-            </span>
-          </div>
-        </div>
+  let orgStatus: 'pending' | 'approved' | 'rejected' = 'approved'
 
-        {role === 'organization' ? (
-          <OrganizationDashboard />
-        ) : (
-          <VolunteerDashboard />
-        )}
-      </main>
-    </div>
-  )
+  // Check profile in database
+  if (role === 'volunteer') {
+    const { data: volProfile } = await supabase
+      .from('volunteer_profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (!volProfile) {
+      isNewUser = true
+      completionPercentage = 25
+      missingFields.push('skills', 'interests', 'availability')
+    } else {
+      let score = 50
+      if (volProfile.skills && volProfile.skills.length > 0) score += 20
+      else missingFields.push('skills')
+
+      if (volProfile.interests && volProfile.interests.length > 0) score += 15
+      else missingFields.push('interests')
+
+      if (volProfile.availability) score += 15
+      else missingFields.push('availability')
+
+      completionPercentage = score
+    }
+  } else if (role === 'organization') {
+    const { data: orgProfile } = await supabase
+      .from('organizations')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (!orgProfile) {
+      isNewUser = true
+      completionPercentage = 25
+      missingFields.push('website', 'verification document')
+      orgStatus = 'pending'
+    } else {
+      orgStatus = (orgProfile.status as 'pending' | 'approved' | 'rejected') ?? 'pending'
+      let score = 50
+      if (orgProfile.website) score += 25
+      else missingFields.push('website')
+
+      if (orgProfile.verification_document_url) score += 25
+      else missingFields.push('verification document')
+
+      completionPercentage = score
+    }
+  }
+
+  const profileStatus = {
+    isNewUser,
+    completionPercentage,
+    role,
+    orgStatus,
+    missingFields,
+  }
+
+  return <DashboardClient user={user} profileStatus={profileStatus} />
 }

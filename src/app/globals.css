@@ -1294,3 +1294,12 @@
     padding: 1.25rem 1rem;
   }
 }
+
+/* ── Custom Utilities ──────────────────────────────────── */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

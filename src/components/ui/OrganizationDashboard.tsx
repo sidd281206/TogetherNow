@@ -1,35 +1,51 @@
-export default function OrganizationDashboard() {
+'use client'
+
+import React from 'react'
+import OpportunitiesFeed, { OpportunitiesFeedRef } from '@/components/ui/OpportunitiesFeed'
+import { Calendar, Users, CheckCircle, Plus } from 'lucide-react'
+
+interface OrganizationDashboardProps {
+  opportunitiesRef?: React.RefObject<OpportunitiesFeedRef | null>
+}
+
+export default function OrganizationDashboard({ opportunitiesRef }: OrganizationDashboardProps) {
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="dashboard-info-card text-center p-6">
-          <div className="text-3xl font-bold text-white mb-1">0</div>
-          <div className="text-sm text-[var(--auth-text-muted)]">Active Opportunities</div>
+    <div className="space-y-8">
+      {/* Organization Metric Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 flex items-center justify-center font-bold text-xl shrink-0">
+            <Calendar className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="text-2xl font-black text-gray-900 dark:text-white leading-none">5 Drives</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Active Opportunities</div>
+          </div>
         </div>
-        <div className="dashboard-info-card text-center p-6">
-          <div className="text-3xl font-bold text-white mb-1">0</div>
-          <div className="text-sm text-[var(--auth-text-muted)]">Pending Applications</div>
+
+        <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/60 text-blue-500 flex items-center justify-center font-bold text-xl shrink-0">
+            <Users className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="text-2xl font-black text-gray-900 dark:text-white leading-none">45</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Volunteers Registered</div>
+          </div>
         </div>
-        <div className="dashboard-info-card text-center p-6">
-          <div className="text-3xl font-bold text-white mb-1">0</div>
-          <div className="text-sm text-[var(--auth-text-muted)]">Hours Logged</div>
+
+        <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-500 flex items-center justify-center font-bold text-xl shrink-0">
+            <CheckCircle className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="text-2xl font-black text-gray-900 dark:text-white leading-none">120 hrs</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Total Community Impact</div>
+          </div>
         </div>
       </div>
 
-      <div className="dashboard-info-card p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="dashboard-info-title text-xl m-0">Your Opportunities</h3>
-          <button className="auth-btn-primary max-w-xs !m-0 !w-auto !py-2 !px-4 text-sm">
-            + Create Opportunity
-          </button>
-        </div>
-
-        <div className="flex flex-col items-center justify-center text-center p-8 border border-dashed border-white/10 rounded-xl bg-white/5">
-          <div className="text-3xl mb-3">📝</div>
-          <h4 className="text-white font-medium mb-1">No opportunities created yet</h4>
-          <p className="dashboard-info-body !mb-0">Start by creating an opportunity to attract volunteers.</p>
-        </div>
-      </div>
+      {/* Opportunities Feed for Organization */}
+      <OpportunitiesFeed ref={opportunitiesRef} userRole="organization" />
     </div>
   )
 }
