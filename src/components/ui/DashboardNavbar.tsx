@@ -10,7 +10,8 @@ import {
   User, 
   LogOut, 
   PlusCircle, 
-  Sparkles
+  Sparkles,
+  ChevronDown
 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { logoutAction } from '@/app/actions/auth'
@@ -189,17 +190,26 @@ export default function DashboardNavbar({
                 setShowProfileMenu(!showProfileMenu)
                 setShowNotifications(false)
               }}
-              className="flex items-center gap-2 p-1 pl-2.5 pr-1.5 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer"
+              className="group flex items-center gap-2.5 pl-3.5 pr-2.5 py-1 rounded-full border border-gray-200 dark:border-gray-700/80 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800/90 hover:border-emerald-300 dark:hover:border-emerald-700/80 shadow-xs hover:shadow-md transition-all duration-200 cursor-pointer"
             >
-              <div className="flex flex-col text-right hidden sm:block">
-                <span className="text-xs font-bold text-gray-900 dark:text-white leading-tight">{firstName}</span>
-                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 capitalize font-medium">
+              <div className="hidden sm:flex flex-col items-end text-right">
+                <span className="text-xs font-bold text-gray-900 dark:text-white leading-tight truncate max-w-[130px]">
+                  {firstName}
+                </span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60 leading-none mt-0.5">
                   {role}
                 </span>
               </div>
-              <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+              
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white flex items-center justify-center font-bold text-xs shadow-xs ring-2 ring-emerald-500/20 dark:ring-emerald-400/20 transition-transform group-hover:scale-105">
                 {firstName[0]?.toUpperCase()}
               </div>
+
+              <ChevronDown
+                className={`w-3.5 h-3.5 text-gray-400 transition-transform duration-200 ${
+                  showProfileMenu ? 'rotate-180 text-emerald-600 dark:text-emerald-400' : 'group-hover:text-gray-600 dark:group-hover:text-gray-300'
+                }`}
+              />
             </button>
 
             {/* Profile Popup Menu */}
