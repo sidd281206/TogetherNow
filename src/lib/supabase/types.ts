@@ -43,6 +43,7 @@ export interface VolunteerProfile {
 
 export interface Organization {
   id: string
+  registration_number?: string | null
   verification_document_url: string | null
   status: VerificationStatus
   verified_at: string | null

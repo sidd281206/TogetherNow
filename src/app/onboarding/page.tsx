@@ -15,26 +15,37 @@ export default async function OnboardingPage() {
   }
 
   const role: string = user.user_metadata?.role ?? 'volunteer'
+  let initialOrgData = null
 
-  // Check if they already completed onboarding
   if (role === 'volunteer') {
     const { data: volProfile } = await supabase
       .from('volunteer_profiles')
       .select('id')
       .eq('id', user.id)
-      .single()
-      
+      .maybeSingle()
+
     if (volProfile) redirect('/dashboard')
   } else if (role === 'organization') {
     const { data: orgProfile } = await supabase
       .from('organizations')
-      .select('id')
+      .select('id, website, registration_number, verification_document_url, status')
       .eq('id', user.id)
-      .single()
-      
-    if (orgProfile) redirect('/dashboard')
+      .maybeSingle()
+
+    if (orgProfile) {
+      // If organization is already verified, do not allow re-submitting profile
+      if (orgProfile.status === 'approved') {
+        redirect('/dashboard')
+      }
+
+      initialOrgData = {
+        website: orgProfile.website || '',
+        registrationNumber: (orgProfile as any).registration_number || '',
+        verificationDocumentUrl: orgProfile.verification_document_url || '',
+        status: orgProfile.status,
+      }
+    }
   } else {
-    // Admin or Donor - redirect to dashboard for now
     redirect('/dashboard')
   }
 
@@ -42,10 +53,14 @@ export default async function OnboardingPage() {
     <div className="auth-page" style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc', padding: '2rem' }}>
       <div className="auth-form-card" style={{ maxWidth: '600px', width: '100%' }}>
         <div className="auth-form-header">
-          <h2 className="auth-form-title">Complete your profile</h2>
+          <h2 className="auth-form-title">
+            {initialOrgData ? 'Re-submit Organization Verification' : 'Verify Your Organization'}
+          </h2>
           <p className="auth-form-subtitle">
             {role === 'volunteer' 
               ? 'Tell us about your skills and interests to find the best opportunities.'
+              : initialOrgData
+              ? 'Review or update your organization details, registration number, or verification document below.'
               : 'Verify your organization to start posting opportunities.'}
           </p>
         </div>
@@ -53,7 +68,7 @@ export default async function OnboardingPage() {
         {role === 'volunteer' ? (
           <VolunteerOnboardingForm />
         ) : (
-          <OrganizationOnboardingForm />
+          <OrganizationOnboardingForm initialData={initialOrgData} />
         )}
       </div>
     </div>

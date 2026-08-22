@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -156,4 +157,41 @@ export async function signInWithGoogleAction(): Promise<void> {
   if (data.url) {
     redirect(data.url)
   }
+}
+
+// ─── Delete Account ───────────────────────────────────────────────────────────
+
+export async function deleteAccountAction(): Promise<never> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/auth/login')
+  }
+
+  const userId = user.id
+
+  // 1. Delete user profile records from application tables
+  await supabase.from('volunteer_profiles').delete().eq('id', userId)
+  await supabase.from('organizations').delete().eq('id', userId)
+  await supabase.from('donors').delete().eq('id', userId)
+  await supabase.from('user_roles').delete().eq('user_id', userId)
+
+  // 2. Sign out current session
+  await supabase.auth.signOut()
+
+  // 3. Purge user account from Supabase Auth admin schema if service key exists
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+  if (serviceKey) {
+    try {
+      const adminClient = createAdminClient(supabaseUrl, serviceKey)
+      await adminClient.auth.admin.deleteUser(userId)
+    } catch (err) {
+      console.warn('Notice purging auth user:', err)
+    }
+  }
+
+  redirect('/auth/login?deleted=true')
 }

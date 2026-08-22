@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { 
   Home, 
@@ -11,10 +11,14 @@ import {
   LogOut, 
   PlusCircle, 
   Sparkles,
-  ChevronDown
+  ChevronDown,
+  Check,
+  Trash2
 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { logoutAction } from '@/app/actions/auth'
+import DeleteAccountModal from '@/components/ui/DeleteAccountModal'
+import { getStoredNotifications, markAllNotificationsRead, AppNotification } from '@/lib/notifications'
 
 interface DashboardNavbarProps {
   user: {
@@ -29,6 +33,7 @@ interface DashboardNavbarProps {
     isNewUser: boolean
     completionPercentage: number
     role: string
+    orgStatus?: string
   }
   onSearchClick?: () => void
   onPostOpportunityClick?: () => void
@@ -42,28 +47,34 @@ export default function DashboardNavbar({
 }: DashboardNavbarProps) {
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
-  const [notificationsRead, setNotificationsRead] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
 
   const fullName = user.user_metadata?.full_name ?? user.email ?? 'Member'
   const firstName = fullName.split(' ')[0]
   const role = profileStatus.role ?? 'volunteer'
 
-  const mockNotifications = [
-    {
-      id: '1',
-      title: 'Welcome to TogetherNow!',
-      message: 'Explore events and volunteer opportunities in your area.',
-      time: 'Just now',
-      unread: !notificationsRead,
-    },
-    {
-      id: '2',
-      title: 'Profile Tip',
-      message: `${profileStatus.completionPercentage}% complete. Complete remaining details to get better matches!`,
-      time: '2h ago',
-      unread: !notificationsRead,
-    },
-  ]
+  // Load and listen for notifications
+  useEffect(() => {
+    const refreshNotifications = () => {
+      setNotifications(getStoredNotifications(role))
+    }
+    refreshNotifications()
+
+    window.addEventListener('togethernow_new_notification', refreshNotifications)
+    window.addEventListener('storage', refreshNotifications)
+    return () => {
+      window.removeEventListener('togethernow_new_notification', refreshNotifications)
+      window.removeEventListener('storage', refreshNotifications)
+    }
+  }, [role])
+
+  const unreadCount = notifications.filter((n) => n.unread).length
+
+  const handleMarkAllRead = () => {
+    markAllNotificationsRead()
+    setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })))
+  }
 
   return (
     <header className="sticky top-0 z-40 w-full backdrop-blur-md bg-white/90 dark:bg-gray-900/90 border-b border-gray-200/80 dark:border-gray-800/80 shadow-xs transition-all">
@@ -144,39 +155,61 @@ export default function DashboardNavbar({
               className="relative p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors border-none bg-transparent cursor-pointer"
             >
               <Bell className="w-5 h-5" />
-              {!notificationsRead && (
-                <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-emerald-500 rounded-full ring-2 ring-white dark:ring-gray-900 animate-pulse" />
+              {unreadCount > 0 && (
+                <span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-emerald-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center ring-2 ring-white dark:ring-gray-900 animate-pulse">
+                  {unreadCount}
+                </span>
               )}
             </button>
 
             {showNotifications && (
-              <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-800 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="absolute right-0 mt-2 w-84 sm:w-96 bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-800 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3 mb-3">
                   <div className="flex items-center gap-2">
                     <Bell className="w-4 h-4 text-emerald-600" />
                     <h4 className="font-bold text-sm text-gray-900 dark:text-white m-0">Notifications</h4>
+                    {unreadCount > 0 && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                        {unreadCount} new
+                      </span>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setNotificationsRead(true)}
-                    className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:underline border-none bg-transparent cursor-pointer"
-                  >
-                    Mark all read
-                  </button>
-                </div>
-                <div className="space-y-2.5 max-h-64 overflow-y-auto">
-                  {mockNotifications.map((n) => (
-                    <div
-                      key={n.id}
-                      className="p-2.5 rounded-xl bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  {unreadCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleMarkAllRead}
+                      className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:underline border-none bg-transparent cursor-pointer"
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-semibold text-xs text-gray-900 dark:text-white">{n.title}</span>
-                        <span className="text-[10px] text-gray-400">{n.time}</span>
-                      </div>
-                      <p className="text-xs text-gray-600 dark:text-gray-300 m-0 leading-snug">{n.message}</p>
+                      Mark all read
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-2.5 max-h-72 overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-gray-500 dark:text-gray-400">
+                      No notifications yet
                     </div>
-                  ))}
+                  ) : (
+                    notifications.map((n) => (
+                      <div
+                        key={n.id}
+                        className={`p-3 rounded-xl border transition-all ${
+                          n.unread
+                            ? 'bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-200/60 dark:border-emerald-900/50'
+                            : 'bg-gray-50/70 dark:bg-gray-800/40 border-gray-100 dark:border-gray-800'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-xs text-gray-900 dark:text-white flex items-center gap-1.5">
+                            {n.unread && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />}
+                            <span>{n.title}</span>
+                          </span>
+                          <span className="text-[10px] text-gray-400 shrink-0">{n.time}</span>
+                        </div>
+                        <p className="text-xs text-gray-600 dark:text-gray-300 m-0 leading-relaxed">{n.message}</p>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             )}
@@ -201,8 +234,18 @@ export default function DashboardNavbar({
                 </span>
               </div>
               
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white flex items-center justify-center font-bold text-xs shadow-xs ring-2 ring-emerald-500/20 dark:ring-emerald-400/20 transition-transform group-hover:scale-105">
-                {firstName[0]?.toUpperCase()}
+              <div className="relative">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white flex items-center justify-center font-bold text-xs shadow-xs ring-2 ring-emerald-500/20 dark:ring-emerald-400/20 transition-transform group-hover:scale-105">
+                  {firstName[0]?.toUpperCase()}
+                </div>
+                {role === 'organization' && profileStatus.orgStatus === 'approved' && (
+                  <span
+                    className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-600 dark:bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-md ring-2 ring-white dark:ring-gray-900"
+                    title="Verified Organization Account"
+                  >
+                    <Check className="w-2.5 h-2.5 stroke-[3]" />
+                  </span>
+                )}
               </div>
 
               <ChevronDown
@@ -216,8 +259,18 @@ export default function DashboardNavbar({
             {showProfileMenu && (
               <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-800 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="flex items-center gap-3 pb-3 mb-3 border-b border-gray-100 dark:border-gray-800">
-                  <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shadow-xs">
-                    {firstName[0]?.toUpperCase()}
+                  <div className="relative">
+                    <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shadow-xs">
+                      {firstName[0]?.toUpperCase()}
+                    </div>
+                    {role === 'organization' && profileStatus.orgStatus === 'approved' && (
+                      <span
+                        className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-emerald-600 dark:bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-md ring-2 ring-white dark:ring-gray-900"
+                        title="Verified Organization Account"
+                      >
+                        <Check className="w-3 h-3 stroke-[3]" />
+                      </span>
+                    )}
                   </div>
                   <div>
                     <h4 className="font-bold text-sm text-gray-900 dark:text-white m-0 leading-tight">{fullName}</h4>
@@ -270,12 +323,24 @@ export default function DashboardNavbar({
                   <form action={logoutAction}>
                     <button
                       type="submit"
-                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl transition-colors border-none bg-transparent cursor-pointer text-left"
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-colors border-none bg-transparent cursor-pointer text-left"
                     >
-                      <LogOut className="w-4 h-4" />
+                      <LogOut className="w-4 h-4 text-gray-500" />
                       <span>Sign Out</span>
                     </button>
                   </form>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false)
+                      setShowDeleteModal(true)
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors border-none bg-transparent cursor-pointer text-left"
+                  >
+                    <Trash2 className="w-4 h-4 text-rose-500" />
+                    <span>Delete Account</span>
+                  </button>
                 </div>
               </div>
             )}
@@ -283,6 +348,13 @@ export default function DashboardNavbar({
 
         </div>
       </div>
+
+      {/* Account Deletion Confirmation Modal */}
+      <DeleteAccountModal
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        userEmail={user.email}
+      />
     </header>
   )
 }

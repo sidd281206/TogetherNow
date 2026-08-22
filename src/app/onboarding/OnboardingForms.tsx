@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useState, useActionState } from 'react'
 import { completeVolunteerProfileAction, completeOrganizationProfileAction, type OnboardingState } from '@/app/actions/onboarding'
 
 const initialState: OnboardingState = null
@@ -63,16 +63,52 @@ export function VolunteerOnboardingForm() {
   )
 }
 
-export function OrganizationOnboardingForm() {
+interface OrganizationOnboardingFormProps {
+  initialData?: {
+    website?: string
+    registrationNumber?: string
+    verificationDocumentUrl?: string
+    status?: string
+  } | null
+}
+
+export function OrganizationOnboardingForm({ initialData }: OrganizationOnboardingFormProps) {
   const [state, action, pending] = useActionState(completeOrganizationProfileAction, initialState)
+  const [docMode, setDocMode] = useState<'file' | 'url'>(
+    initialData?.verificationDocumentUrl?.startsWith('http') ? 'url' : 'file'
+  )
 
   return (
     <form action={action} className="auth-form" noValidate>
+      {initialData && (
+        <div style={{ padding: '10px 14px', borderRadius: '12px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af', fontSize: '0.82rem', marginBottom: '16px' }}>
+          ℹ️ <strong>Editing Profile Details:</strong> Update your registration number, website, or attach a new verification PDF document below.
+        </div>
+      )}
+
       {state?.errors?.general && (
         <div className="auth-alert auth-alert-error" role="alert">
           {state.errors.general[0]}
         </div>
       )}
+
+      {/* Hidden input for doc mode */}
+      <input type="hidden" name="verificationDocType" value={docMode} />
+
+      <div className="auth-field">
+        <label htmlFor="registrationNumber" className="auth-label">Registration Number</label>
+        <input
+          id="registrationNumber"
+          name="registrationNumber"
+          type="text"
+          defaultValue={initialData?.registrationNumber ?? ''}
+          placeholder="e.g. NGO-84920-IND or 80G/12A Reg No."
+          className={`auth-input ${state?.errors?.registrationNumber ? 'auth-input-error' : ''}`}
+        />
+        {state?.errors?.registrationNumber && (
+          <p className="auth-field-error">{state.errors.registrationNumber[0]}</p>
+        )}
+      </div>
 
       <div className="auth-field">
         <label htmlFor="website" className="auth-label">Organization Website</label>
@@ -80,6 +116,7 @@ export function OrganizationOnboardingForm() {
           id="website"
           name="website"
           type="url"
+          defaultValue={initialData?.website ?? ''}
           placeholder="https://example.org"
           className={`auth-input ${state?.errors?.website ? 'auth-input-error' : ''}`}
         />
@@ -87,22 +124,88 @@ export function OrganizationOnboardingForm() {
       </div>
 
       <div className="auth-field">
-        <label htmlFor="verificationDocumentUrl" className="auth-label">Verification Details</label>
-        <input
-          id="verificationDocumentUrl"
-          name="verificationDocumentUrl"
-          type="text"
-          placeholder="Registration Number or Document URL"
-          className={`auth-input ${state?.errors?.verification ? 'auth-input-error' : ''}`}
-        />
-        <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>
-          Please provide your NGO registration number or a link to your verification document.
-        </p>
+        <label className="auth-label">Verification Document Attachment</label>
+        
+        {/* Toggle option buttons */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+          <button
+            type="button"
+            onClick={() => setDocMode('file')}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: '8px',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: docMode === 'file' ? '2px solid #10b981' : '1px solid #cbd5e1',
+              backgroundColor: docMode === 'file' ? '#ecfdf5' : '#f8fafc',
+              color: docMode === 'file' ? '#047857' : '#64748b',
+              transition: 'all 0.2s',
+            }}
+          >
+            📄 Attach PDF File
+          </button>
+          <button
+            type="button"
+            onClick={() => setDocMode('url')}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: '8px',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: docMode === 'url' ? '2px solid #10b981' : '1px solid #cbd5e1',
+              backgroundColor: docMode === 'url' ? '#ecfdf5' : '#f8fafc',
+              color: docMode === 'url' ? '#047857' : '#64748b',
+              transition: 'all 0.2s',
+            }}
+          >
+            🔗 Document Link (URL)
+          </button>
+        </div>
+
+        {docMode === 'file' ? (
+          <div>
+            <input
+              id="verificationFile"
+              name="verificationFile"
+              type="file"
+              accept=".pdf"
+              className={`auth-input ${state?.errors?.verification ? 'auth-input-error' : ''}`}
+              style={{ padding: '8px' }}
+            />
+            {initialData?.verificationDocumentUrl && (
+              <p style={{ fontSize: '0.78rem', color: '#047857', marginTop: '6px', fontWeight: 500 }}>
+                Existing Document: {initialData.verificationDocumentUrl.startsWith('http') ? 'Uploaded PDF File' : initialData.verificationDocumentUrl}. (Uploading a new file above will replace it).
+              </p>
+            )}
+            <p style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '4px' }}>
+              Upload your official NGO registration certificate or tax exempt document in PDF format.
+            </p>
+          </div>
+        ) : (
+          <div>
+            <input
+              id="verificationDocumentUrl"
+              name="verificationDocumentUrl"
+              type="url"
+              defaultValue={initialData?.verificationDocumentUrl?.startsWith('http') ? initialData.verificationDocumentUrl : ''}
+              placeholder="https://drive.google.com/... or https://example.org/verify.pdf"
+              className={`auth-input ${state?.errors?.verification ? 'auth-input-error' : ''}`}
+            />
+            <p style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '6px' }}>
+              Paste a public cloud link or website URL pointing to your verification document.
+            </p>
+          </div>
+        )}
+
         {state?.errors?.verification && <p className="auth-field-error">{state.errors.verification[0]}</p>}
       </div>
 
       <button type="submit" disabled={pending} className="auth-btn-primary">
-        {pending ? 'Saving...' : 'Submit for Verification'}
+        {pending ? 'Saving...' : initialData ? 'Submit Changes & Re-verify' : 'Submit for Verification'}
       </button>
     </form>
   )

@@ -1,6 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 
 export type AdminState = {
@@ -54,6 +55,8 @@ export async function approveOrganizationAction(orgId: string): Promise<AdminSta
     return { error: error.message }
   }
 
+  revalidatePath('/admin/dashboard')
+  revalidatePath('/dashboard')
   return { message: 'Organization approved successfully!' }
 }
 
@@ -70,6 +73,8 @@ export async function rejectOrganizationAction(orgId: string, reason?: string): 
     return { error: error.message }
   }
 
+  revalidatePath('/admin/dashboard')
+  revalidatePath('/dashboard')
   return { message: 'Organization rejected.' }
 }
 
@@ -104,3 +109,46 @@ export async function rejectDonorAction(donorId: string): Promise<AdminState> {
 
   return { message: 'Donor status updated.' }
 }
+
+export async function fetchAdminOrganizations() {
+  try {
+    const supabase = await createClient()
+
+    // Query organizations from Supabase
+    const { data: dbOrgs, error } = await supabase
+      .from('organizations')
+      .select('id, website, verification_document_url, registration_number, status, verified_at')
+
+    if (error || !dbOrgs) {
+      console.warn('Could not fetch organizations from Supabase:', error)
+      return []
+    }
+
+    // Try fetching profiles to get organization names
+    const orgIds = dbOrgs.map((o) => o.id)
+    const { data: dbProfiles } = await supabase
+      .from('profiles')
+      .select('id, full_name')
+      .in('id', orgIds)
+
+    const profileMap = new Map((dbProfiles ?? []).map((p) => [p.id, p.full_name]))
+
+    return dbOrgs.map((org: any) => {
+      const name = profileMap.get(org.id) || `Organization (${org.id.slice(0, 8)})`
+      return {
+        id: org.id,
+        name,
+        email: `org-${org.id.slice(0, 6)}@togethernow.org`,
+        website: org.website || 'https://togethernow.org',
+        registrationNumber: org.registration_number || 'NGO-REG-PENDING',
+        verificationDocumentUrl: org.verification_document_url || 'https://togethernow.org/docs/verify.pdf',
+        status: (org.status as 'pending' | 'approved' | 'rejected') || 'pending',
+        submittedAt: org.verified_at ? new Date(org.verified_at).toLocaleDateString() : 'Just now',
+      }
+    })
+  } catch (err) {
+    console.error('Failed to fetch admin organizations:', err)
+    return []
+  }
+}
+

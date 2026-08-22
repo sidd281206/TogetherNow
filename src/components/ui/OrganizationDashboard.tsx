@@ -2,13 +2,16 @@
 
 import React from 'react'
 import OpportunitiesFeed, { OpportunitiesFeedRef } from '@/components/ui/OpportunitiesFeed'
-import { Calendar, Users, CheckCircle, Plus } from 'lucide-react'
+import { Calendar, Users, CheckCircle, ShieldCheck, XCircle } from 'lucide-react'
+import ResubmitApplicationButton from '@/components/ui/ResubmitApplicationButton'
 
 interface OrganizationDashboardProps {
   opportunitiesRef?: React.RefObject<OpportunitiesFeedRef | null>
+  userId?: string
+  orgStatus?: string
 }
 
-export default function OrganizationDashboard({ opportunitiesRef }: OrganizationDashboardProps) {
+export default function OrganizationDashboard({ opportunitiesRef, userId, orgStatus }: OrganizationDashboardProps) {
   return (
     <div className="space-y-8">
       {/* Organization Metric Cards */}
@@ -43,6 +46,38 @@ export default function OrganizationDashboard({ opportunitiesRef }: Organization
           </div>
         </div>
       </div>
+
+      {/* Organization Verification Control Bar (Verified Orgs) */}
+      {userId && orgStatus === 'approved' && (
+        <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 shadow-xs flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-1.5">
+                <span>Organization Status: Verified</span>
+              </div>
+              <p className="text-[11px] text-emerald-800 dark:text-emerald-300 m-0">
+                Your organization is fully verified by platform administrators. Opportunity posting access is unlocked.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {userId && orgStatus === 'rejected' && (
+        <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 text-rose-900 dark:text-rose-200 space-y-1 shadow-xs">
+          <div className="flex items-center gap-2 text-xs font-bold">
+            <XCircle className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+            <span>Verification Application Rejected — Action Required</span>
+          </div>
+          <p className="text-xs text-rose-800 dark:text-rose-300 m-0">
+            Your verification document was rejected. Please review your NGO registration number and upload an updated PDF document to re-submit.
+          </p>
+          <ResubmitApplicationButton userId={userId} orgStatus={orgStatus} />
+        </div>
+      )}
 
       {/* Opportunities Feed for Organization */}
       <OpportunitiesFeed ref={opportunitiesRef} userRole="organization" />

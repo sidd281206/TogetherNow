@@ -1,11 +1,25 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { loginAction, signInWithGoogleAction, type AuthState } from '@/app/actions/auth'
 import { Logo } from '@/components/ui/Logo'
 
 const initialState: AuthState = null
+
+function DeletedNotice() {
+  const searchParams = useSearchParams()
+  const isDeleted = searchParams.get('deleted') === 'true'
+
+  if (!isDeleted) return null
+
+  return (
+    <div className="auth-alert" style={{ backgroundColor: '#fef2f2', borderColor: '#fca5a5', color: '#991b1b', marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>
+      🗑️ Your account and associated profile data have been permanently deleted.
+    </div>
+  )
+}
 
 export default function LoginPage() {
   const [state, action, pending] = useActionState(loginAction, initialState)
@@ -60,6 +74,10 @@ export default function LoginPage() {
               Sign in to your account to continue your impact journey.
             </p>
           </div>
+
+          <Suspense fallback={null}>
+            <DeletedNotice />
+          </Suspense>
 
           <form action={signInWithGoogleAction}>
             <button type="submit" className="auth-btn-secondary" style={{ width: '100%', marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid #e2e8f0', backgroundColor: 'white', color: '#0f172a', fontWeight: '500', cursor: 'pointer', transition: 'all 0.2s' }}>

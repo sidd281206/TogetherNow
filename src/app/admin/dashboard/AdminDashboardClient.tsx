@@ -24,6 +24,7 @@ export interface PendingOrg {
   name: string
   email: string
   website: string
+  registrationNumber?: string
   verificationDocumentUrl: string
   status: 'pending' | 'approved' | 'rejected'
   submittedAt: string
@@ -45,6 +46,7 @@ const INITIAL_ORGS: PendingOrg[] = [
     name: 'Green Canopy Foundation',
     email: 'contact@greencanopy.org',
     website: 'https://greencanopy.org',
+    registrationNumber: 'NGO-84920-IND',
     verificationDocumentUrl: 'https://togethernow.org/docs/verify-greencanopy.pdf',
     status: 'pending',
     submittedAt: 'Today, 14:30',
@@ -54,6 +56,7 @@ const INITIAL_ORGS: PendingOrg[] = [
     name: 'Nourish Hope Relief Network',
     email: 'info@nourishhope.org',
     website: 'https://nourishhope.org',
+    registrationNumber: '80G/12A-77382',
     verificationDocumentUrl: 'https://togethernow.org/docs/verify-nourishhope.pdf',
     status: 'pending',
     submittedAt: 'Yesterday, 09:15',
@@ -63,6 +66,7 @@ const INITIAL_ORGS: PendingOrg[] = [
     name: 'Ocean & Earth Care Alliance',
     email: 'admin@oceanearthcare.org',
     website: 'https://oceanearthcare.org',
+    registrationNumber: 'NGO-10928-GLO',
     verificationDocumentUrl: 'https://togethernow.org/docs/verify-oceanearth.pdf',
     status: 'approved',
     submittedAt: '3 days ago',
@@ -90,8 +94,17 @@ const INITIAL_DONORS: PendingDonor[] = [
   },
 ]
 
-export default function AdminDashboardClient() {
-  const [orgs, setOrgs] = useState<PendingOrg[]>(INITIAL_ORGS)
+interface AdminDashboardClientProps {
+  initialDbOrganizations?: PendingOrg[]
+}
+
+export default function AdminDashboardClient({ initialDbOrganizations = [] }: AdminDashboardClientProps) {
+  const [orgs, setOrgs] = useState<PendingOrg[]>(() => {
+    if (initialDbOrganizations.length === 0) return INITIAL_ORGS
+    const existingIds = new Set(initialDbOrganizations.map((o) => o.id))
+    const fallbackFiltered = INITIAL_ORGS.filter((o) => !existingIds.has(o.id))
+    return [...initialDbOrganizations, ...fallbackFiltered]
+  })
   const [donors, setDonors] = useState<PendingDonor[]>(INITIAL_DONORS)
   const [activeTab, setActiveTab] = useState<'pending-orgs' | 'pending-donors' | 'approved-all'>('pending-orgs')
   const [actionNotice, setActionNotice] = useState<string | null>(null)
@@ -286,6 +299,7 @@ export default function AdminDashboardClient() {
                     </div>
 
                     <div className="text-xs text-slate-400 space-y-1">
+                      <div>Registration Number: <span className="text-emerald-300 font-mono font-bold">{org.registrationNumber || 'NGO-PENDING'}</span></div>
                       <div>Contact Email: <span className="text-slate-200 font-mono">{org.email}</span></div>
                       <div>
                         Website:{' '}
@@ -300,14 +314,20 @@ export default function AdminDashboardClient() {
                       </div>
                       <div>
                         Verification Document:{' '}
-                        <a
-                          href={org.verificationDocumentUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-emerald-400 hover:underline inline-flex items-center gap-1 text-decoration-none"
-                        >
-                          View Document PDF <ExternalLink className="w-3 h-3" />
-                        </a>
+                        {org.verificationDocumentUrl.startsWith('http') ? (
+                          <a
+                            href={org.verificationDocumentUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-emerald-400 hover:underline inline-flex items-center gap-1 text-decoration-none font-semibold"
+                          >
+                            <span>View Attached Verification PDF / Document</span> <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        ) : (
+                          <span className="text-amber-300/90 font-medium text-[11px] bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40 inline-flex items-center gap-1">
+                            📄 {org.verificationDocumentUrl} (Submitted before bucket creation. Re-submit form on /onboarding to upload to Supabase bucket)
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
