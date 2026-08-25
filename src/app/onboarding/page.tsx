@@ -66,9 +66,14 @@ export default async function OnboardingPage() {
         </div>
         
         {role === 'volunteer' ? (
-          <VolunteerOnboardingForm />
+          <VolunteerOnboardingForm userEmail={user.email || ''} />
         ) : (
-          <OrganizationOnboardingForm initialData={initialOrgData} />
+          <OrganizationOnboardingForm
+            initialData={initialOrgData}
+            userEmail={user.email || ''}
+            orgName={user.user_metadata?.full_name || user.user_metadata?.name || ''}
+            userId={user.id}
+          />
         )}
       </div>
     </div>

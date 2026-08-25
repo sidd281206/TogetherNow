@@ -5,7 +5,10 @@ export interface AppNotification {
   time: string
   unread: boolean
   targetRole?: 'volunteer' | 'organization' | 'all'
+  type?: 'approval' | 'declined' | 'application' | 'general'
   eventId?: string
+  eventTitle?: string
+  applicantName?: string
   createdAt?: number
 }
 
@@ -23,6 +26,7 @@ export function getStoredNotifications(userRole?: string): AppNotification[] {
           message: 'Explore events and volunteer opportunities in your community.',
           time: 'Just now',
           unread: true,
+          type: 'general',
           targetRole: 'all',
           createdAt: Date.now(),
         },
@@ -49,7 +53,10 @@ export function pushNotification(notif: Omit<AppNotification, 'id' | 'time' | 'u
       title: notif.title,
       message: notif.message,
       targetRole: notif.targetRole || 'all',
+      type: notif.type || 'general',
       eventId: notif.eventId,
+      eventTitle: notif.eventTitle,
+      applicantName: notif.applicantName,
       time: 'Just now',
       unread: true,
       createdAt: Date.now(),
@@ -75,3 +82,18 @@ export function markAllNotificationsRead(): void {
     console.warn('Error marking notifications as read:', err)
   }
 }
+
+export function deleteNotification(id: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    const raw = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY)
+    if (!raw) return
+    const existing: AppNotification[] = JSON.parse(raw)
+    const updated = existing.filter((n) => n.id !== id)
+    localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(updated))
+    window.dispatchEvent(new CustomEvent('togethernow_new_notification'))
+  } catch (err) {
+    console.warn('Error deleting notification:', err)
+  }
+}
+

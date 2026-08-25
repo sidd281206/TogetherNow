@@ -105,6 +105,7 @@ export default function DashboardClient({ user, profileStatus }: DashboardClient
         {/* Dynamic Profile Prompt Banner (New Users vs Existing Incomplete Users) */}
         <ProfilePromptBanner
           userName={fullName}
+          userEmail={user.email || ''}
           profileStatus={profileStatus}
         />
 
@@ -142,10 +143,17 @@ export default function DashboardClient({ user, profileStatus }: DashboardClient
           <OrganizationDashboard
             opportunitiesRef={opportunitiesRef}
             userId={user.id}
+            userEmail={user.email || ''}
             orgStatus={profileStatus.orgStatus}
+            organizationName={fullName}
           />
         ) : (
-          <VolunteerDashboard opportunitiesRef={opportunitiesRef} />
+          <VolunteerDashboard
+            opportunitiesRef={opportunitiesRef}
+            userEmail={user.email || ''}
+            userName={fullName}
+            profileStatus={profileStatus}
+          />
         )}
 
       </main>

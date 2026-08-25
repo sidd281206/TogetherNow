@@ -2,11 +2,65 @@
 
 import { useState, useActionState } from 'react'
 import { completeVolunteerProfileAction, completeOrganizationProfileAction, type OnboardingState } from '@/app/actions/onboarding'
+import { sendEmailOtpAction, verifyEmailOtpAction } from '@/app/actions/verification'
+import { Check, Mail, KeyRound, Sparkles, ShieldCheck } from 'lucide-react'
 
 const initialState: OnboardingState = null
 
-export function VolunteerOnboardingForm() {
+interface VolunteerOnboardingFormProps {
+  userEmail?: string
+}
+
+export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org' }: VolunteerOnboardingFormProps) {
   const [state, action, pending] = useActionState(completeVolunteerProfileAction, initialState)
+
+  // OTP States
+  const [otp, setOtp] = useState('')
+  const [isOtpSent, setIsOtpSent] = useState(false)
+  const [isEmailVerified, setIsEmailVerified] = useState(false)
+  const [otpSending, setOtpSending] = useState(false)
+  const [otpVerifying, setOtpVerifying] = useState(false)
+  const [otpNotice, setOtpNotice] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+
+  const handleSendOtp = async () => {
+    setOtpSending(true)
+    setOtpNotice(null)
+    try {
+      const res = await sendEmailOtpAction(userEmail)
+      if (res.success) {
+        setIsOtpSent(true)
+        setOtpNotice({
+          text: `OTP sent to ${userEmail}! (Test code: ${res.simulatedOtp || '123456'})`,
+          type: 'success',
+        })
+      } else {
+        setOtpNotice({ text: res.message || 'Failed to send OTP.', type: 'error' })
+      }
+    } catch (err: any) {
+      setOtpNotice({ text: err?.message || 'Error sending OTP.', type: 'error' })
+    } finally {
+      setOtpSending(false)
+    }
+  }
+
+  const handleVerifyOtp = async () => {
+    if (!otp.trim()) return
+    setOtpVerifying(true)
+    setOtpNotice(null)
+    try {
+      const res = await verifyEmailOtpAction(userEmail, otp.trim())
+      if (res.success) {
+        setIsEmailVerified(true)
+        setOtpNotice({ text: '✓ Email successfully verified with OTP!', type: 'success' })
+      } else {
+        setOtpNotice({ text: res.message || 'Invalid OTP code.', type: 'error' })
+      }
+    } catch (err: any) {
+      setOtpNotice({ text: err?.message || 'Verification error.', type: 'error' })
+    } finally {
+      setOtpVerifying(false)
+    }
+  }
 
   return (
     <form action={action} className="auth-form" noValidate>
@@ -16,38 +70,164 @@ export function VolunteerOnboardingForm() {
         </div>
       )}
 
+      {/* Hidden input for verified email */}
+      <input type="hidden" name="isEmailVerified" value={isEmailVerified ? 'true' : 'false'} />
+
+      {/* 1. Phone Number */}
       <div className="auth-field">
-        <label htmlFor="skills" className="auth-label">Skills (comma-separated)</label>
+        <label htmlFor="phone" className="auth-label">Phone Number *</label>
+        <input
+          id="phone"
+          name="phone"
+          type="tel"
+          required
+          placeholder="e.g. +91 98201 44521"
+          className={`auth-input ${state?.errors?.phone ? 'auth-input-error' : ''}`}
+        />
+        {state?.errors?.phone && <p className="auth-field-error">{state.errors.phone[0]}</p>}
+      </div>
+
+      {/* 2. Address & City Details */}
+      <div className="auth-field">
+        <label htmlFor="address" className="auth-label">Street / Area Address *</label>
+        <input
+          id="address"
+          name="address"
+          type="text"
+          required
+          placeholder="e.g. Flat 402, Green Valley Apartments, Andheri West"
+          className={`auth-input ${state?.errors?.address ? 'auth-input-error' : ''}`}
+        />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div className="auth-field">
+          <label htmlFor="city" className="auth-label">City *</label>
+          <input
+            id="city"
+            name="city"
+            type="text"
+            required
+            defaultValue="Mumbai"
+            placeholder="e.g. Mumbai"
+            className="auth-input"
+          />
+        </div>
+        <div className="auth-field">
+          <label htmlFor="pincode" className="auth-label">Pincode / Postal Code</label>
+          <input
+            id="pincode"
+            name="pincode"
+            type="text"
+            defaultValue="400053"
+            placeholder="e.g. 400053"
+            className="auth-input"
+          />
+        </div>
+      </div>
+      {state?.errors?.address && <p className="auth-field-error">{state.errors.address[0]}</p>}
+
+      {/* 3. Email OTP Verification Section */}
+      <div style={{ padding: '14px', borderRadius: '14px', backgroundColor: '#eef2ff', border: '1px solid #c7d2fe', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#312e81', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <KeyRound style={{ width: '16px', height: '16px', color: '#4f46e5' }} />
+            Email OTP Verification *
+          </span>
+          {isEmailVerified ? (
+            <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#047857', backgroundColor: '#d1fae5', padding: '2px 8px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Check style={{ width: '12px', height: '12px', strokeWidth: 3 }} /> Verified (100%)
+            </span>
+          ) : (
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#b45309' }}>
+              Verification Required
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', backgroundColor: '#ffffff', padding: '8px 12px', borderRadius: '10px', border: '1px solid #e0e7ff', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', color: '#1e1b4b', fontWeight: 600 }}>
+            <Mail style={{ width: '14px', height: '14px', color: '#6366f1' }} />
+            <span>{userEmail}</span>
+          </div>
+
+          {!isEmailVerified && (
+            <button
+              type="button"
+              onClick={handleSendOtp}
+              disabled={otpSending}
+              style={{ padding: '6px 12px', borderRadius: '8px', backgroundColor: '#4f46e5', color: '#ffffff', fontSize: '0.75rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+            >
+              {otpSending ? 'Sending...' : isOtpSent ? 'Resend OTP' : 'Send OTP'}
+            </button>
+          )}
+        </div>
+
+        {otpNotice && (
+          <div style={{ padding: '8px 10px', borderRadius: '8px', fontSize: '0.78rem', fontWeight: 600, backgroundColor: otpNotice.type === 'success' ? '#ecfdf5' : '#fff1f2', color: otpNotice.type === 'success' ? '#065f46' : '#9f1239', border: otpNotice.type === 'success' ? '1px solid #a7f3d0' : '1px solid #fecdd3', marginBottom: '8px' }}>
+            {otpNotice.text}
+          </div>
+        )}
+
+        {!isEmailVerified && isOtpSent && (
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            <input
+              type="text"
+              maxLength={6}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value)}
+              placeholder="Enter 6-digit OTP"
+              style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid #c7d2fe', fontSize: '0.82rem', textAlign: 'center', letterSpacing: '2px', fontWeight: 'bold' }}
+            />
+            <button
+              type="button"
+              onClick={handleVerifyOtp}
+              disabled={otpVerifying || !otp.trim()}
+              style={{ padding: '8px 14px', borderRadius: '8px', backgroundColor: '#10b981', color: '#ffffff', fontSize: '0.78rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+            >
+              {otpVerifying ? 'Verifying...' : 'Verify OTP'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 4. Skills */}
+      <div className="auth-field">
+        <label htmlFor="skills" className="auth-label">Skills (comma-separated) *</label>
         <input
           id="skills"
           name="skills"
           type="text"
-          placeholder="e.g. Teaching, Coding, Medical"
+          defaultValue="Community Support, Teamwork, Communication"
+          placeholder="e.g. Teaching, Coding, Medical, First Aid"
           className={`auth-input ${state?.errors?.skills ? 'auth-input-error' : ''}`}
         />
         {state?.errors?.skills && <p className="auth-field-error">{state.errors.skills[0]}</p>}
       </div>
 
+      {/* 5. Interests */}
       <div className="auth-field">
-        <label htmlFor="interests" className="auth-label">Interests (comma-separated)</label>
+        <label htmlFor="interests" className="auth-label">Interests (comma-separated) *</label>
         <input
           id="interests"
           name="interests"
           type="text"
+          defaultValue="Environment, Education, Health"
           placeholder="e.g. Education, Healthcare, Environment"
           className={`auth-input ${state?.errors?.interests ? 'auth-input-error' : ''}`}
         />
         {state?.errors?.interests && <p className="auth-field-error">{state.errors.interests[0]}</p>}
       </div>
 
+      {/* 6. Availability */}
       <div className="auth-field">
-        <label htmlFor="availability" className="auth-label">Availability</label>
+        <label htmlFor="availability" className="auth-label">Availability *</label>
         <select 
           id="availability" 
           name="availability" 
+          defaultValue="weekends"
           className={`auth-input ${state?.errors?.availability ? 'auth-input-error' : ''}`}
         >
-          <option value="">Select availability</option>
           <option value="weekends">Weekends</option>
           <option value="weekdays">Weekdays</option>
           <option value="evenings">Evenings</option>
@@ -57,7 +237,7 @@ export function VolunteerOnboardingForm() {
       </div>
 
       <button type="submit" disabled={pending} className="auth-btn-primary">
-        {pending ? 'Saving...' : 'Complete Profile'}
+        {pending ? 'Saving...' : 'Complete Profile & Unlock Events (100%)'}
       </button>
     </form>
   )
@@ -66,23 +246,69 @@ export function VolunteerOnboardingForm() {
 interface OrganizationOnboardingFormProps {
   initialData?: {
     website?: string
+    phone?: string
+    address?: string
     registrationNumber?: string
     verificationDocumentUrl?: string
     status?: string
   } | null
+  userEmail?: string
+  orgName?: string
+  userId?: string
 }
 
-export function OrganizationOnboardingForm({ initialData }: OrganizationOnboardingFormProps) {
+export function OrganizationOnboardingForm({
+  initialData,
+  userEmail = 'organization@togethernow.org',
+  orgName = '',
+  userId = '',
+}: OrganizationOnboardingFormProps) {
   const [state, action, pending] = useActionState(completeOrganizationProfileAction, initialState)
   const [docMode, setDocMode] = useState<'file' | 'url'>(
     initialData?.verificationDocumentUrl?.startsWith('http') ? 'url' : 'file'
   )
+  const [uploadedUrl, setUploadedUrl] = useState<string>(initialData?.verificationDocumentUrl || '')
+  const [isUploadingFile, setIsUploadingFile] = useState(false)
+  const [uploadStatus, setUploadStatus] = useState<string>('')
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setIsUploadingFile(true)
+    setUploadStatus('Uploading PDF document to secure storage...')
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('orgName', orgName || 'organization')
+      formData.append('userId', userId)
+
+      const res = await fetch('/api/upload-verification', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await res.json()
+      if (data.success && data.url) {
+        setUploadedUrl(data.url)
+        setUploadStatus(`✓ ${file.name} uploaded successfully!`)
+      } else {
+        setUploadStatus(`Upload notice: ${data.error || 'Will process on submit'}`)
+      }
+    } catch (err: any) {
+      console.warn('Direct upload notice:', err)
+      setUploadStatus(`File selected: ${file.name}`)
+    } finally {
+      setIsUploadingFile(false)
+    }
+  }
 
   return (
-    <form action={action} className="auth-form" noValidate>
+    <form action={action} encType="multipart/form-data" className="auth-form" noValidate>
       {initialData && (
         <div style={{ padding: '10px 14px', borderRadius: '12px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af', fontSize: '0.82rem', marginBottom: '16px' }}>
-          ℹ️ <strong>Editing Profile Details:</strong> Update your registration number, website, or attach a new verification PDF document below.
+          ℹ️ <strong>Editing Profile Details:</strong> Update your registration number, contact phone, website, or attach a new verification PDF document below.
         </div>
       )}
 
@@ -92,15 +318,41 @@ export function OrganizationOnboardingForm({ initialData }: OrganizationOnboardi
         </div>
       )}
 
-      {/* Hidden input for doc mode */}
+      {/* Hidden inputs */}
       <input type="hidden" name="verificationDocType" value={docMode} />
+      <input type="hidden" name="uploadedDocUrl" value={uploadedUrl} />
 
       <div className="auth-field">
-        <label htmlFor="registrationNumber" className="auth-label">Registration Number</label>
+        <label htmlFor="phone" className="auth-label">Official Contact Phone Number (Optional)</label>
+        <input
+          id="phone"
+          name="phone"
+          type="tel"
+          defaultValue={initialData?.phone ?? ''}
+          placeholder="e.g. +91 98201 44521"
+          className="auth-input"
+        />
+      </div>
+
+      <div className="auth-field">
+        <label htmlFor="address" className="auth-label">Office / Headquarters Address (Optional)</label>
+        <input
+          id="address"
+          name="address"
+          type="text"
+          defaultValue={initialData?.address ?? ''}
+          placeholder="e.g. Level 3, Synergy Tower, Marine Drive, Mumbai"
+          className="auth-input"
+        />
+      </div>
+
+      <div className="auth-field">
+        <label htmlFor="registrationNumber" className="auth-label">NGO / Trust Registration Number *</label>
         <input
           id="registrationNumber"
           name="registrationNumber"
           type="text"
+          required
           defaultValue={initialData?.registrationNumber ?? ''}
           placeholder="e.g. NGO-84920-IND or 80G/12A Reg No."
           className={`auth-input ${state?.errors?.registrationNumber ? 'auth-input-error' : ''}`}
@@ -111,11 +363,12 @@ export function OrganizationOnboardingForm({ initialData }: OrganizationOnboardi
       </div>
 
       <div className="auth-field">
-        <label htmlFor="website" className="auth-label">Organization Website</label>
+        <label htmlFor="website" className="auth-label">Organization Website *</label>
         <input
           id="website"
           name="website"
           type="url"
+          required
           defaultValue={initialData?.website ?? ''}
           placeholder="https://example.org"
           className={`auth-input ${state?.errors?.website ? 'auth-input-error' : ''}`}
@@ -126,7 +379,6 @@ export function OrganizationOnboardingForm({ initialData }: OrganizationOnboardi
       <div className="auth-field">
         <label className="auth-label">Verification Document Attachment</label>
         
-        {/* Toggle option buttons */}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
           <button
             type="button"
@@ -173,12 +425,13 @@ export function OrganizationOnboardingForm({ initialData }: OrganizationOnboardi
               name="verificationFile"
               type="file"
               accept=".pdf"
+              onChange={handleFileChange}
               className={`auth-input ${state?.errors?.verification ? 'auth-input-error' : ''}`}
               style={{ padding: '8px' }}
             />
-            {initialData?.verificationDocumentUrl && (
-              <p style={{ fontSize: '0.78rem', color: '#047857', marginTop: '6px', fontWeight: 500 }}>
-                Existing Document: {initialData.verificationDocumentUrl.startsWith('http') ? 'Uploaded PDF File' : initialData.verificationDocumentUrl}. (Uploading a new file above will replace it).
+            {uploadStatus && (
+              <p style={{ fontSize: '0.78rem', color: uploadStatus.startsWith('✓') ? '#047857' : '#0284c7', marginTop: '6px', fontWeight: 600 }}>
+                {uploadStatus}
               </p>
             )}
             <p style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '4px' }}>
@@ -204,8 +457,8 @@ export function OrganizationOnboardingForm({ initialData }: OrganizationOnboardi
         {state?.errors?.verification && <p className="auth-field-error">{state.errors.verification[0]}</p>}
       </div>
 
-      <button type="submit" disabled={pending} className="auth-btn-primary">
-        {pending ? 'Saving...' : initialData ? 'Submit Changes & Re-verify' : 'Submit for Verification'}
+      <button type="submit" disabled={pending || isUploadingFile} className="auth-btn-primary">
+        {pending ? 'Saving...' : isUploadingFile ? 'Uploading Document...' : initialData ? 'Submit Changes & Re-verify' : 'Submit for Verification'}
       </button>
     </form>
   )

@@ -13,12 +13,16 @@ import {
   Sparkles,
   ChevronDown,
   Check,
-  Trash2
+  CheckCircle2,
+  XCircle,
+  Users,
+  Trash2,
+  X
 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { logoutAction } from '@/app/actions/auth'
 import DeleteAccountModal from '@/components/ui/DeleteAccountModal'
-import { getStoredNotifications, markAllNotificationsRead, AppNotification } from '@/lib/notifications'
+import { getStoredNotifications, markAllNotificationsRead, deleteNotification, AppNotification } from '@/lib/notifications'
 
 interface DashboardNavbarProps {
   user: {
@@ -54,6 +58,30 @@ export default function DashboardNavbar({
   const firstName = fullName.split(' ')[0]
   const role = profileStatus.role ?? 'volunteer'
 
+  const [clientCompletion, setClientCompletion] = useState<number>(profileStatus.completionPercentage)
+
+  // Live Profile Strength listener
+  useEffect(() => {
+    const refreshCompletion = () => {
+      try {
+        const isLocallyComplete = typeof window !== 'undefined' && localStorage.getItem(`togethernow_profile_complete_${user.email}`) === 'true'
+        if (isLocallyComplete) {
+          setClientCompletion(100)
+        } else {
+          setClientCompletion(profileStatus.completionPercentage)
+        }
+      } catch {}
+    }
+    refreshCompletion()
+
+    window.addEventListener('togethernow_profile_completed', refreshCompletion)
+    window.addEventListener('storage', refreshCompletion)
+    return () => {
+      window.removeEventListener('togethernow_profile_completed', refreshCompletion)
+      window.removeEventListener('storage', refreshCompletion)
+    }
+  }, [user.email, profileStatus.completionPercentage])
+
   // Load and listen for notifications
   useEffect(() => {
     const refreshNotifications = () => {
@@ -74,6 +102,12 @@ export default function DashboardNavbar({
   const handleMarkAllRead = () => {
     markAllNotificationsRead()
     setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })))
+  }
+
+  const handleDeleteNotification = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation()
+    deleteNotification(id)
+    setNotifications((prev) => prev.filter((n) => n.id !== id))
   }
 
   return (
@@ -163,7 +197,7 @@ export default function DashboardNavbar({
             </button>
 
             {showNotifications && (
-              <div className="absolute right-0 mt-2 w-84 sm:w-96 bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-800 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="absolute right-0 mt-2 w-84 sm:w-96 bg-white dark:bg-gray-900 rounded-3xl shadow-xl border border-gray-100 dark:border-gray-800 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3 mb-3">
                   <div className="flex items-center gap-2">
                     <Bell className="w-4 h-4 text-emerald-600" />
@@ -184,16 +218,17 @@ export default function DashboardNavbar({
                     </button>
                   )}
                 </div>
-                <div className="space-y-2.5 max-h-72 overflow-y-auto">
+                <div className="space-y-2.5 max-h-72 overflow-y-auto pr-0.5">
                   {notifications.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-gray-500 dark:text-gray-400">
-                      No notifications yet
+                    <div className="text-center py-8 text-xs text-gray-500 dark:text-gray-400">
+                      <Bell className="w-6 h-6 text-gray-400 mx-auto mb-1.5 opacity-50" />
+                      <span>No notifications yet</span>
                     </div>
                   ) : (
                     notifications.map((n) => (
                       <div
                         key={n.id}
-                        className={`p-3 rounded-xl border transition-all ${
+                        className={`p-3 rounded-2xl border transition-all relative group ${
                           n.unread
                             ? 'bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-200/60 dark:border-emerald-900/50'
                             : 'bg-gray-50/70 dark:bg-gray-800/40 border-gray-100 dark:border-gray-800'
@@ -201,10 +236,28 @@ export default function DashboardNavbar({
                       >
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-xs text-gray-900 dark:text-white flex items-center gap-1.5">
-                            {n.unread && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />}
-                            <span>{n.title}</span>
+                            {n.type === 'approval' ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            ) : n.type === 'declined' ? (
+                              <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                            ) : n.type === 'application' ? (
+                              <Users className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                            ) : (
+                              n.unread && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                            )}
+                            <span className="truncate max-w-[200px]">{n.title}</span>
                           </span>
-                          <span className="text-[10px] text-gray-400 shrink-0">{n.time}</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[10px] text-gray-400">{n.time}</span>
+                            <button
+                              type="button"
+                              title="Delete notification"
+                              onClick={(e) => handleDeleteNotification(e, n.id)}
+                              className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-rose-500 transition-opacity border-none bg-transparent cursor-pointer p-0.5"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
                         </div>
                         <p className="text-xs text-gray-600 dark:text-gray-300 m-0 leading-relaxed">{n.message}</p>
                       </div>
@@ -214,6 +267,7 @@ export default function DashboardNavbar({
               </div>
             )}
           </div>
+
 
           {/* User Profile Pill & Dropdown Menu */}
           <div className="relative">
@@ -287,13 +341,13 @@ export default function DashboardNavbar({
                       <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Profile Strength
                     </span>
                     <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">
-                      {profileStatus.completionPercentage}%
+                      {clientCompletion}%
                     </span>
                   </div>
                   <div className="w-full bg-emerald-200/70 dark:bg-emerald-900/60 h-2 rounded-full overflow-hidden">
                     <div
                       className="bg-emerald-600 h-full rounded-full transition-all duration-500"
-                      style={{ width: `${profileStatus.completionPercentage}%` }}
+                      style={{ width: `${clientCompletion}%` }}
                     />
                   </div>
                   <Link
@@ -301,11 +355,11 @@ export default function DashboardNavbar({
                     onClick={() => setShowProfileMenu(false)}
                     className="inline-block mt-2 text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:underline text-decoration-none"
                   >
-                    {profileStatus.isNewUser
+                    {clientCompletion >= 100
+                      ? 'Edit profile →'
+                      : profileStatus.isNewUser
                       ? 'Complete profile now →'
-                      : profileStatus.completionPercentage < 100
-                      ? 'Finish remaining details →'
-                      : 'Edit profile →'}
+                      : 'Finish remaining details →'}
                   </Link>
                 </div>
 
@@ -354,6 +408,8 @@ export default function DashboardNavbar({
         isOpen={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
         userEmail={user.email}
+        userName={fullName}
+        userRole={role}
       />
     </header>
   )

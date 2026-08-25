@@ -34,32 +34,52 @@ export default async function DashboardPage() {
   let completionPercentage = 100
   const missingFields: string[] = []
 
-  let orgStatus: 'pending' | 'approved' | 'rejected' = 'approved'
+  let orgStatus: 'unsubmitted' | 'pending' | 'approved' | 'rejected' = 'approved'
 
-  // Check profile in database
-  if (role === 'volunteer') {
+  // Check profile in database and user metadata
+  if (role === 'volunteer' || role === 'donor') {
+    const userMeta = user.user_metadata || {}
+
     const { data: volProfile } = await supabase
       .from('volunteer_profiles')
       .select('*')
       .eq('id', user.id)
       .maybeSingle()
 
-    if (!volProfile) {
-      isNewUser = true
-      completionPercentage = 25
-      missingFields.push('skills', 'interests', 'availability')
+    const { data: userProfile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (userMeta.profile_completed || userMeta.completionPercentage === 100) {
+      completionPercentage = 100
+      isNewUser = false
     } else {
-      let score = 50
-      if (volProfile.skills && volProfile.skills.length > 0) score += 20
+      const hasSkills = Boolean((volProfile?.skills && volProfile.skills.length > 0) || userMeta.skills)
+      const hasInterests = Boolean((volProfile?.interests && volProfile.interests.length > 0) || userMeta.interests)
+      const hasPhone = Boolean((volProfile as any)?.phone || (userProfile as any)?.phone || userMeta.phone)
+      const hasAddress = Boolean((volProfile as any)?.address || (userProfile as any)?.address || (userProfile as any)?.city || userMeta.address || userMeta.city)
+      const isEmailVerified = Boolean((volProfile as any)?.email_verified || (userProfile as any)?.email_verified || user.email_confirmed_at || userMeta.email_verified || userMeta.isEmailVerified)
+
+      let score = 0
+      if (hasSkills || hasInterests) score += 25
       else missingFields.push('skills')
 
-      if (volProfile.interests && volProfile.interests.length > 0) score += 15
-      else missingFields.push('interests')
+      if (hasPhone) score += 25
+      else missingFields.push('phone number')
 
-      if (volProfile.availability) score += 15
-      else missingFields.push('availability')
+      if (hasAddress) score += 25
+      else missingFields.push('address details')
 
-      completionPercentage = score
+      if (isEmailVerified) score += 25
+      else missingFields.push('email OTP verification')
+
+      if (!volProfile && !hasPhone && !userMeta.phone) {
+        isNewUser = true
+      }
+
+      completionPercentage = Math.min(100, score)
     }
   } else if (role === 'organization') {
     const { data: orgProfile } = await supabase
@@ -71,18 +91,23 @@ export default async function DashboardPage() {
     if (!orgProfile) {
       isNewUser = true
       completionPercentage = 25
-      missingFields.push('website', 'verification document')
-      orgStatus = 'pending'
+      missingFields.push('registration number', 'website', 'verification document')
+      orgStatus = 'unsubmitted'
     } else {
       orgStatus = (orgProfile.status as 'pending' | 'approved' | 'rejected') ?? 'pending'
-      let score = 50
-      if (orgProfile.website) score += 25
-      else missingFields.push('website')
+      
+      if (orgStatus === 'approved') {
+        completionPercentage = 100
+      } else {
+        let score = 50
+        if (orgProfile.website) score += 25
+        else missingFields.push('website')
 
-      if (orgProfile.verification_document_url) score += 25
-      else missingFields.push('verification document')
+        if (orgProfile.verification_document_url) score += 25
+        else missingFields.push('verification document')
 
-      completionPercentage = score
+        completionPercentage = Math.min(100, score)
+      }
     }
   }
 

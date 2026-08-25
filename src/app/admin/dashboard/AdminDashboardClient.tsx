@@ -314,20 +314,14 @@ export default function AdminDashboardClient({ initialDbOrganizations = [] }: Ad
                       </div>
                       <div>
                         Verification Document:{' '}
-                        {org.verificationDocumentUrl.startsWith('http') ? (
-                          <a
-                            href={org.verificationDocumentUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-emerald-400 hover:underline inline-flex items-center gap-1 text-decoration-none font-semibold"
-                          >
-                            <span>View Attached Verification PDF / Document</span> <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        ) : (
-                          <span className="text-amber-300/90 font-medium text-[11px] bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40 inline-flex items-center gap-1">
-                            📄 {org.verificationDocumentUrl} (Submitted before bucket creation. Re-submit form on /onboarding to upload to Supabase bucket)
-                          </span>
-                        )}
+                        <a
+                          href={`/api/document?url=${encodeURIComponent(org.verificationDocumentUrl)}&orgId=${org.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-emerald-400 hover:underline inline-flex items-center gap-1 text-decoration-none font-semibold"
+                        >
+                          <span>📄 View Attached Verification PDF / Document</span> <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
                       </div>
                     </div>
                   </div>

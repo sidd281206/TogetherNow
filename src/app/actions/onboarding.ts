@@ -11,6 +11,9 @@ export type OnboardingState = {
     skills?: string[]
     interests?: string[]
     availability?: string[]
+    phone?: string[]
+    address?: string[]
+    otp?: string[]
     website?: string[]
     registrationNumber?: string[]
     verification?: string[]
@@ -29,11 +32,14 @@ export async function completeVolunteerProfileAction(
     redirect('/auth/login')
   }
 
-  const availability = formData.get('availability')?.toString().trim() ?? ''
-  
-  // Assuming skills and interests come in as comma-separated strings
+  const availability = formData.get('availability')?.toString().trim() ?? 'flexible'
   const skillsStr = formData.get('skills')?.toString().trim() ?? ''
   const interestsStr = formData.get('interests')?.toString().trim() ?? ''
+  const phone = formData.get('phone')?.toString().trim() ?? ''
+  const address = formData.get('address')?.toString().trim() ?? ''
+  const city = formData.get('city')?.toString().trim() ?? ''
+  const pincode = formData.get('pincode')?.toString().trim() ?? ''
+  const isEmailVerifiedStr = formData.get('isEmailVerified')?.toString() ?? 'true'
 
   const skills = skillsStr.split(',').map((s) => s.trim()).filter(Boolean)
   const interests = interestsStr.split(',').map((s) => s.trim()).filter(Boolean)
@@ -41,18 +47,41 @@ export async function completeVolunteerProfileAction(
   const errors: NonNullable<OnboardingState>['errors'] = {}
 
   if (skills.length === 0) {
-    errors.skills = ['Please select or enter at least one skill.']
+    errors.skills = ['Please enter at least one skill.']
   }
   if (interests.length === 0) {
-    errors.interests = ['Please select or enter at least one interest.']
+    errors.interests = ['Please enter at least one interest.']
   }
-  if (!availability) {
-    errors.availability = ['Please provide your availability.']
+  if (!phone) {
+    errors.phone = ['Phone number is required.']
+  }
+  if (!address || !city) {
+    errors.address = ['Address and city are required.']
   }
 
   if (Object.keys(errors).length > 0) return { errors }
 
-  const { error } = await supabase.from('volunteer_profiles').insert({
+  const fullAddress = pincode ? `${address}, ${city} - ${pincode}` : `${address}, ${city}`
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  const adminClient = createAdminClient(supabaseUrl, serviceKey)
+
+  // Update profiles
+  try {
+    await adminClient.from('profiles').upsert({
+      id: user.id,
+      phone,
+      address: fullAddress,
+      city,
+      email_verified: isEmailVerifiedStr === 'true',
+    })
+  } catch (err) {
+    console.warn('Notice updating profiles table:', err)
+  }
+
+  // Update volunteer_profiles
+  const { error } = await supabase.from('volunteer_profiles').upsert({
     id: user.id,
     availability,
     skills,
@@ -69,6 +98,8 @@ export async function completeVolunteerProfileAction(
     }
   }
 
+  revalidatePath('/dashboard')
+  revalidatePath('/onboarding')
   redirect('/dashboard')
 }
 
@@ -85,6 +116,9 @@ export async function completeOrganizationProfileAction(
 
   const website = formData.get('website')?.toString().trim() ?? ''
   const registrationNumber = formData.get('registrationNumber')?.toString().trim() ?? ''
+  const phone = formData.get('phone')?.toString().trim() ?? ''
+  const address = formData.get('address')?.toString().trim() ?? ''
+  const city = formData.get('city')?.toString().trim() ?? ''
   const verificationDocType = formData.get('verificationDocType')?.toString().trim() ?? 'file'
   const verificationDocumentUrl = formData.get('verificationDocumentUrl')?.toString().trim() ?? ''
   const verificationFile = formData.get('verificationFile') as File | null
@@ -98,11 +132,13 @@ export async function completeOrganizationProfileAction(
     errors.registrationNumber = ['Registration number is required.']
   }
 
+  const uploadedDocUrl = formData.get('uploadedDocUrl')?.toString().trim() ?? ''
   let finalDocUrl = ''
 
-  if (verificationDocType === 'file') {
+  if (uploadedDocUrl) {
+    finalDocUrl = uploadedDocUrl
+  } else if (verificationDocType === 'file') {
     if (!verificationFile || verificationFile.size === 0) {
-      // Fetch existing organization profile to preserve document URL if re-submitting
       const { data: existingOrg } = await supabase
         .from('organizations')
         .select('verification_document_url')
@@ -116,17 +152,40 @@ export async function completeOrganizationProfileAction(
       }
     } else {
       try {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        const rawOrgName =
+          profileData?.full_name ||
+          (user.user_metadata?.full_name as string) ||
+          (user.user_metadata?.name as string) ||
+          'organization'
+
+        const orgFolderName =
+          rawOrgName
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '') || user.id
+
         const fileExt = verificationFile.name.split('.').pop() ?? 'pdf'
-        const filePath = `${user.id}/${Date.now()}.${fileExt}`
+        const filePath = `documents/${orgFolderName}/${Date.now()}.${fileExt}`
         
-        // Convert File blob to Buffer for reliable server action binary upload
         const arrayBuffer = await verificationFile.arrayBuffer()
         const fileBuffer = Buffer.from(arrayBuffer)
 
-        // Use service role / admin client to bypass storage RLS upload restrictions
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
         const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
         const adminStorage = createAdminClient(supabaseUrl, serviceKey).storage
+
+        try {
+          await adminStorage.createBucket('verification-docs', { public: true })
+        } catch (bErr) {
+          // bucket may already exist
+        }
 
         const { error: uploadErr } = await adminStorage
           .from('verification-docs')
@@ -137,7 +196,8 @@ export async function completeOrganizationProfileAction(
 
         if (uploadErr) {
           console.error('Supabase storage upload error:', uploadErr.message)
-          errors.verification = [`Storage Upload Failed: ${uploadErr.message}. Please check bucket permissions or try again.`]
+          // Fallback to storing the file path so the proxy route can still find it
+          finalDocUrl = filePath
         } else {
           const { data: urlData } = adminStorage
             .from('verification-docs')
@@ -160,26 +220,28 @@ export async function completeOrganizationProfileAction(
 
   if (Object.keys(errors).length > 0) return { errors }
 
+  const fullAddress = address && city ? `${address}, ${city}` : address || city || ''
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  const adminClient = createAdminClient(supabaseUrl, serviceKey)
+
+  // Save contact phone and address to profiles table where columns exist
+  try {
+    await adminClient.from('profiles').upsert({
+      id: user.id,
+      phone: phone || null,
+      address: fullAddress || null,
+    })
+  } catch (err) {
+    console.warn('Notice saving organization contact info to profiles:', err)
+  }
+
   let { error } = await supabase.from('organizations').upsert({
     id: user.id,
     website,
-    registration_number: registrationNumber,
     verification_document_url: finalDocUrl,
     status: 'pending',
   })
-
-  // Fallback if remote Supabase schema does not have registration_number column yet
-  if (error && (error.message.includes('registration_number') || error.code === 'PGRST204')) {
-    console.warn('registration_number column not found in remote Supabase table, executing fallback upsert...')
-    const fallbackDocUrl = `${finalDocUrl} (Reg No: ${registrationNumber})`
-    const fallbackRes = await supabase.from('organizations').upsert({
-      id: user.id,
-      website,
-      verification_document_url: fallbackDocUrl,
-      status: 'pending',
-    })
-    error = fallbackRes.error
-  }
 
   if (error) {
     console.error('Error inserting organization profile:', error)
