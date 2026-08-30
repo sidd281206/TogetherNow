@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import OpportunitiesFeed, { OpportunitiesFeedRef, Applicant, Opportunity } from '@/components/ui/OpportunitiesFeed'
+import OpportunitiesFeed, { OpportunitiesFeedRef, Applicant, Opportunity, INITIAL_OPPORTUNITIES } from '@/components/ui/OpportunitiesFeed'
 import { 
   Award, 
   Clock, 
@@ -23,9 +23,13 @@ import {
   ChevronRight,
   ExternalLink,
   Navigation,
-  Ban
+  Ban,
+  Star
 } from 'lucide-react'
 import { getStoredNotifications, AppNotification } from '@/lib/notifications'
+import OrganizationAboutModal from '@/components/ui/OrganizationAboutModal'
+import OrganizationRatingModal from '@/components/ui/OrganizationRatingModal'
+import { getOrgRatingSummary, hasVolunteerReviewedEvent } from '@/lib/ratings'
 
 interface VolunteerDashboardProps {
   opportunitiesRef?: React.RefObject<OpportunitiesFeedRef | null>
@@ -51,6 +55,9 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [viewingOpportunity, setViewingOpportunity] = useState<Opportunity | null>(null)
+  const [selectedOrgForAbout, setSelectedOrgForAbout] = useState<string | null>(null)
+  const [ratingEvent, setRatingEvent] = useState<{ op: Opportunity; app: Applicant } | null>(null)
+  const [reviewedEventsMap, setReviewedEventsMap] = useState<Record<string, boolean>>({})
 
   const refreshData = () => {
     try {
@@ -185,14 +192,15 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
             {userApplications.map((app) => {
-              const matchedOp = opportunities.find((o) => o.id === app.eventId)
+              const matchedOp = opportunities.find((o) => o.id === app.eventId) || INITIAL_OPPORTUNITIES.find((o) => o.id === app.eventId || o.title.toLowerCase() === app.eventTitle?.toLowerCase())
               const totalRequired = matchedOp?.totalRequired ?? (matchedOp?.spotsLeft ? matchedOp.spotsLeft + (matchedOp.alreadyRegistered ?? 0) : 20)
               const alreadyRegistered = matchedOp?.alreadyRegistered ?? (app.status === 'accepted' ? 1 : 0)
               const spotsLeft = matchedOp ? matchedOp.spotsLeft : Math.max(0, totalRequired - alreadyRegistered)
               const percentFilled = Math.min(100, Math.round((alreadyRegistered / Math.max(1, totalRequired)) * 100))
-              const managerName = matchedOp?.managerName || matchedOp?.organization || 'Coordinator'
-              const managerPhone = matchedOp?.managerPhone || ''
-              const address = matchedOp?.address || matchedOp?.location || 'Local Community Center'
+              const orgName = matchedOp?.organization || 'Community Non-Profit Organization'
+              const managerName = matchedOp?.managerName || 'Drive Coordinator'
+              const managerPhone = matchedOp?.managerPhone || '+91 98201 44521'
+              const address = matchedOp?.address || matchedOp?.location || 'Marine Drive Coastal Stretch, Mumbai 400020'
               const isRemote = Boolean(matchedOp?.isRemote)
 
               return (
@@ -220,7 +228,7 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
                           {app.eventTitle || matchedOp?.title || 'Volunteer Event'}
                         </h5>
                         <div className="text-[11px] text-gray-500 dark:text-gray-400 font-medium flex items-center gap-2">
-                          {matchedOp?.organization && <span>By {matchedOp.organization}</span>}
+                          <span>By <strong>{orgName}</strong></span>
                           <span>• Applied {app.appliedAt}</span>
                         </div>
                       </div>
@@ -229,6 +237,8 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
                         className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold shrink-0 shadow-xs ${
                           matchedOp?.isCancelled
                             ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/80 dark:text-rose-200'
+                            : matchedOp?.isCompleted
+                            ? 'bg-emerald-700 text-white ring-2 ring-emerald-500/50 shadow-md'
                             : app.status === 'accepted'
                             ? 'bg-emerald-600 text-white ring-2 ring-emerald-500/40'
                             : app.status === 'declined'
@@ -240,6 +250,11 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
                           <>
                             <Ban className="w-3 h-3 text-rose-600" />
                             <span>Event Cancelled 🚫</span>
+                          </>
+                        ) : matchedOp?.isCompleted ? (
+                          <>
+                            <CheckCircle2 className="w-3 h-3 text-emerald-300 stroke-[3]" />
+                            <span>Completed 🎉</span>
                           </>
                         ) : app.status === 'accepted' ? (
                           <>
@@ -260,31 +275,48 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
                       </span>
                     </div>
 
-                    {/* Person In Charge & Venue Address Card with Map Link */}
-                    <div className="bg-white/90 dark:bg-gray-800/90 p-3 rounded-xl border border-gray-200/70 dark:border-gray-700/60 space-y-2 text-xs">
+                    {/* Organization, Person In Charge & Venue Address Details Box */}
+                    <div className="bg-white/95 dark:bg-gray-800/95 p-3.5 rounded-2xl border border-gray-200/80 dark:border-gray-700/70 space-y-2.5 text-xs shadow-xs">
                       
-                      {/* Organizer / Foundation */}
-                      <div className="flex items-center justify-between">
+                      {/* 1. Organization Name Row */}
+                      <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5 truncate">
-                          <Building2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                          <span className="text-gray-500 dark:text-gray-400 text-[11px]">Organizer:</span>
-                          <span className="font-bold text-gray-900 dark:text-white truncate">{matchedOp?.organization || 'Organizing Foundation'}</span>
+                          <Building2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span className="text-gray-500 dark:text-gray-400 text-[11px] font-medium">Organization:</span>
+                          <span className="font-extrabold text-gray-900 dark:text-white truncate">{orgName}</span>
+                          <span className="hidden sm:inline-flex items-center px-1.5 py-0.2 rounded-md bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold border border-emerald-200/60 dark:border-emerald-800/60 shrink-0">
+                            Verified
+                          </span>
                         </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedOrgForAbout(orgName)
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white dark:bg-indigo-950/80 dark:text-indigo-300 dark:hover:bg-indigo-700 font-bold text-[11px] border border-indigo-200 dark:border-indigo-800/60 transition-all cursor-pointer shadow-2xs shrink-0"
+                          title="Know More about this organization, their mission, work & photos"
+                        >
+                          <Info className="w-3 h-3" />
+                          <span>Know More</span>
+                        </button>
                       </div>
 
-                      {/* Coordinator / Manager */}
-                      <div className="flex items-center justify-between">
+                      {/* 2. Event Manager / In-Charge & Phone Number Row */}
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-100 dark:border-gray-700/60">
                         <div className="flex items-center gap-1.5 truncate">
-                          <UserCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                          <span className="text-gray-500 dark:text-gray-400 text-[11px]">In-Charge:</span>
-                          <span className="font-bold text-gray-900 dark:text-white truncate">{managerName}</span>
+                          <UserCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                          <span className="text-gray-500 dark:text-gray-400 text-[11px] font-medium">Event Manager:</span>
+                          <span className="font-extrabold text-gray-900 dark:text-white truncate">{managerName}</span>
                         </div>
 
                         {managerPhone ? (
                           <a
                             href={`tel:${managerPhone}`}
                             onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 font-bold text-[11px] border border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-600 hover:text-white transition-all text-decoration-none shrink-0"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white dark:bg-emerald-950/80 dark:text-emerald-300 dark:hover:bg-emerald-700 font-bold text-[11px] border border-emerald-200 dark:border-emerald-800/60 transition-all text-decoration-none shrink-0 shadow-2xs"
+                            title={`Call Event Manager (${managerName})`}
                           >
                             <Phone className="w-3 h-3" />
                             <span>{managerPhone}</span>
@@ -294,11 +326,14 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
                         )}
                       </div>
 
-                      {/* Detailed Address & Open on Maps Button */}
-                      <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-gray-100 dark:border-gray-700/60">
-                        <div className="flex items-start gap-1.5 text-[11px] text-gray-600 dark:text-gray-300 truncate">
-                          <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                          <span className="truncate font-medium">{address}</span>
+                      {/* 3. Venue Address & Open on Maps Row */}
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-100 dark:border-gray-700/60">
+                        <div className="flex items-start gap-1.5 text-[11px] text-gray-700 dark:text-gray-300 truncate">
+                          <MapPin className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                          <div className="truncate">
+                            <span className="text-gray-500 dark:text-gray-400 text-[11px] font-medium mr-1">Address:</span>
+                            <span className="font-semibold text-gray-900 dark:text-white">{address}</span>
+                          </div>
                         </div>
 
                         {!isRemote && (
@@ -307,11 +342,11 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-600 hover:text-white transition-all text-[10px] font-bold border border-indigo-200 dark:border-indigo-800/60 shrink-0 text-decoration-none"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white dark:bg-indigo-950/80 dark:text-indigo-300 dark:hover:bg-indigo-700 transition-all text-[11px] font-bold border border-indigo-200 dark:border-indigo-800/60 shrink-0 text-decoration-none shadow-2xs"
                             title="Open in Google Maps"
                           >
-                            <Navigation className="w-2.5 h-2.5" />
-                            <span>Open on Maps</span>
+                            <Navigation className="w-3 h-3" />
+                            <span>Open Maps</span>
                             <ExternalLink className="w-2.5 h-2.5" />
                           </a>
                         )}
@@ -367,12 +402,51 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
                         <span>This event was cancelled by the organization ({matchedOp.cancelReason || 'Schedule adjustment'}).</span>
                       </div>
                     ) : app.status === 'accepted' ? (
-                      <div className="text-[11px] text-emerald-800 dark:text-emerald-300 font-semibold flex items-center justify-between bg-emerald-100/70 dark:bg-emerald-950/70 p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800/60">
-                        <div className="flex items-center gap-1.5">
-                          <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          <span>Spot confirmed! Contact <strong>{managerName}</strong> • Click for map</span>
+                      <div className="space-y-2">
+                        <div className="text-[11px] text-emerald-800 dark:text-emerald-300 font-semibold flex items-center justify-between bg-emerald-100/70 dark:bg-emerald-950/70 p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800/60">
+                          <div className="flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>Spot confirmed! Contact <strong>{managerName}</strong> • Click for map</span>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-emerald-600 shrink-0" />
                         </div>
-                        <ChevronRight className="w-4 h-4 text-emerald-600 shrink-0" />
+
+                        {/* Rate Organization Action Button */}
+                        <div className="pt-1">
+                          {(app.eventId && reviewedEventsMap[app.eventId]) || (app.eventId && hasVolunteerReviewedEvent(userEmail || '', app.eventId)) ? (
+                            <div className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-bold text-xs border border-amber-200/80 dark:border-amber-900/60">
+                              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                              <span>⭐ Rating & Review Submitted</span>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setRatingEvent({
+                                  op: matchedOp || {
+                                    id: app.eventId || 'event-id',
+                                    title: app.eventTitle || 'Volunteer Event',
+                                    organization: 'Organizing Foundation',
+                                    category: 'Community',
+                                    location: 'Mumbai',
+                                    isRemote: false,
+                                    date: 'Recent',
+                                    time: 'Day',
+                                    spotsLeft: 0,
+                                    skillsNeeded: [],
+                                    description: '',
+                                  },
+                                  app,
+                                })
+                              }}
+                              className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-bold text-xs shadow-xs hover:shadow-md transition-all border-none cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                              <Star className="w-3.5 h-3.5 fill-white" />
+                              <span>⭐ Rate & Review {matchedOp?.organization || 'Organization'}</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ) : app.status === 'declined' ? (
                       <div className="text-[11px] text-rose-800 dark:text-rose-300 font-medium bg-rose-100/50 dark:bg-rose-950/50 p-2.5 rounded-xl border border-rose-200/50 dark:border-rose-800/40">
@@ -411,9 +485,21 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
                 <h3 className="text-lg font-extrabold text-gray-900 dark:text-white m-0">
                   {viewingOpportunity.title}
                 </h3>
-                <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-                  <Building2 className="w-3.5 h-3.5 text-gray-400" />
-                  <span className="font-semibold text-gray-700 dark:text-gray-300">{viewingOpportunity.organization}</span>
+                <div className="flex items-center gap-2 flex-wrap text-xs text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-gray-400" />
+                    <span className="font-bold text-gray-900 dark:text-white">{viewingOpportunity.organization}</span>
+                  </div>
+                  {viewingOpportunity.organization && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedOrgForAbout(viewingOpportunity.organization)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white dark:bg-indigo-950/80 dark:text-indigo-300 dark:hover:bg-indigo-700 font-bold text-[10px] border border-indigo-200 dark:border-indigo-800/60 transition-all cursor-pointer shadow-2xs"
+                    >
+                      <Info className="w-3 h-3" />
+                      <span>Know More</span>
+                    </button>
+                  )}
                 </div>
               </div>
               <button
@@ -571,6 +657,33 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
         userEmail={userEmail}
         userProfileStatus={profileStatus}
       />
+
+      {/* Organization About Us & Trust Modal (Know More) */}
+      {selectedOrgForAbout && (
+        <OrganizationAboutModal
+          isOpen={Boolean(selectedOrgForAbout)}
+          onClose={() => setSelectedOrgForAbout(null)}
+          organizationName={selectedOrgForAbout}
+        />
+      )}
+
+      {/* Volunteer Rating Modal */}
+      {ratingEvent && (
+        <OrganizationRatingModal
+          isOpen={Boolean(ratingEvent)}
+          onClose={() => setRatingEvent(null)}
+          organizationName={ratingEvent.op.organization || 'Community Organization'}
+          eventId={ratingEvent.app.eventId}
+          eventTitle={ratingEvent.op.title || ratingEvent.app.eventTitle}
+          volunteerName={userName || 'Volunteer'}
+          volunteerEmail={userEmail || 'volunteer@togethernow.org'}
+          onReviewSubmitted={() => {
+            if (ratingEvent && ratingEvent.app.eventId) {
+              setReviewedEventsMap((prev) => ({ ...prev, [ratingEvent.app.eventId!]: true }))
+            }
+          }}
+        />
+      )}
     </div>
   )
 }

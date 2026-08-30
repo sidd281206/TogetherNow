@@ -34,17 +34,21 @@ import {
   RotateCcw,
   Lock,
   ShieldAlert,
-  ShieldCheck
+  ShieldCheck,
+  Star
 } from 'lucide-react'
 import { 
   createOpportunityAction, 
   fetchOpportunitiesAction, 
   submitVolunteerApplicationAction, 
   updateApplicantStatusAction,
-  cancelOpportunityAction
+  cancelOpportunityAction,
+  markOpportunityCompletedAction
 } from '@/app/actions/opportunities'
 import { pushNotification } from '@/lib/notifications'
 import ProfileCompletionModal from './ProfileCompletionModal'
+import OrganizationAboutModal from '@/components/ui/OrganizationAboutModal'
+import { getOrgRatingSummary } from '@/lib/ratings'
 
 export interface Opportunity {
   id: string
@@ -72,6 +76,8 @@ export interface Opportunity {
   isCancelled?: boolean
   cancelledAt?: string
   cancelReason?: string
+  isCompleted?: boolean
+  completedAt?: string
 }
 
 export interface Applicant {
@@ -123,7 +129,7 @@ function formatDateDisplay(dateStr: string): string {
   }
 }
 
-const INITIAL_OPPORTUNITIES: Opportunity[] = [
+export const INITIAL_OPPORTUNITIES: Opportunity[] = [
   {
     id: '1',
     title: 'Community Beach & Park Cleanup',
@@ -334,6 +340,11 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
     // Cancellation Modal State
     const [cancellingEvent, setCancellingEvent] = useState<Opportunity | null>(null)
     const [cancelReasonInput, setCancelReasonInput] = useState('')
+    const [confirmCompleteEvent, setConfirmCompleteEvent] = useState<Opportunity | null>(null)
+
+    // Organization About Us & Trust Modal State (Know More)
+    const [selectedOrgForAbout, setSelectedOrgForAbout] = useState<string | null>(null)
+    const [aboutInitialTab, setAboutInitialTab] = useState<'about' | 'gallery' | 'pastEvents' | 'reviews' | 'contact'>('about')
 
     // Profile 100% Verification Gating Modal State
     const [showProfileCompleteModal, setShowProfileCompleteModal] = useState(false)
@@ -410,20 +421,31 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
           if (dbOps && dbOps.length > 0) {
             setOpportunities((prev) => {
               const idMap = new Map<string, Opportunity>()
-              dbOps.forEach((op) => idMap.set(op.id, op))
-              prev.forEach((op) => {
-                if (!idMap.has(op.id)) idMap.set(op.id, op)
-              })
-              return Array.from(idMap.values())
-            })
+              prev.forEach((op) => idMap.set(op.id, op))
 
-            try {
-              const localSaved = localStorage.getItem(STORAGE_KEY)
-              const existing: Opportunity[] = localSaved ? JSON.parse(localSaved) : []
-              const combined = [...dbOps, ...existing]
-              const unique = Array.from(new Map(combined.map((o) => [o.id, o])).values())
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(unique))
-            } catch {}
+              dbOps.forEach((dbOp) => {
+                const existing = idMap.get(dbOp.id)
+                if (existing) {
+                  idMap.set(dbOp.id, {
+                    ...existing,
+                    ...dbOp,
+                    date: (dbOp.date && dbOp.date !== 'Upcoming') ? dbOp.date : (existing.date || dbOp.date || 'Upcoming'),
+                    time: (dbOp.time && dbOp.time !== 'Flexible' && dbOp.time !== 'To be scheduled') ? dbOp.time : (existing.time || dbOp.time || '09:00 AM - 01:00 PM'),
+                    address: (dbOp.address && dbOp.address !== 'Local Community Center' && dbOp.address !== 'Remote') ? dbOp.address : (existing.address || dbOp.address || existing.location),
+                    location: dbOp.location || existing.location || 'Local Community Center',
+                    managerName: (dbOp.managerName && dbOp.managerName !== 'Event Coordinator' && dbOp.managerName !== 'Coordinator') ? dbOp.managerName : (existing.managerName || dbOp.managerName),
+                    managerPhone: dbOp.managerPhone ? dbOp.managerPhone : (existing.managerPhone || ''),
+                  })
+                } else {
+                  idMap.set(dbOp.id, dbOp as Opportunity)
+                }
+              })
+              const merged = Array.from(idMap.values())
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
+              } catch {}
+              return merged
+            })
           }
         } catch (err) {
           console.warn('Error fetching opportunities from DB:', err)
@@ -664,13 +686,102 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       }
     }
 
+    // Permanently Mark Event Completed (No reopening allowed once confirmed)
+    const executeCompleteEvent = (event: Opportunity) => {
+      const completedTime = new Date().toISOString()
+
+      setOpportunities((prev) => {
+        const updated = prev.map((op) =>
+          op.id === event.id
+            ? { ...op, isCompleted: true, completedAt: completedTime }
+            : op
+        )
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
+        } catch {}
+        return updated
+      })
+
+      // Notify accepted candidates
+      const enrolled = applicants.filter((a) => a.eventId === event.id && a.status === 'accepted')
+      enrolled.forEach((app) => {
+        pushNotification({
+          targetRole: 'volunteer',
+          type: 'approval',
+          eventId: event.id,
+          eventTitle: event.title,
+          title: '🎉 Event Completed!',
+          message: `"${event.title}" has been marked as Completed by ${event.organization}. Thank you for making an impact!`,
+        })
+      })
+
+      pushNotification({
+        targetRole: 'organization',
+        type: 'approval',
+        eventId: event.id,
+        eventTitle: event.title,
+        title: 'Event Marked as Completed',
+        message: `"${event.title}" is now permanently marked as Completed.`,
+      })
+
+      setActionFeedbackToast({
+        message: `🎉 "${event.title}" marked as Completed! Enrolled volunteers notified.`,
+        type: 'approve',
+      })
+      setTimeout(() => setActionFeedbackToast(null), 4000)
+
+      markOpportunityCompletedAction({
+        eventId: event.id,
+        isCompleted: true,
+        completedAt: completedTime,
+      }).catch((err) => console.warn('Notice updating event completion in DB:', err))
+
+      if (managingEvent?.id === event.id) {
+        setManagingEvent((prev) =>
+          prev ? { ...prev, isCompleted: true, completedAt: completedTime } : null
+        )
+      }
+
+      setConfirmCompleteEvent(null)
+    }
+
+    const handleOpenCreateModal = () => {
+      // Set sensible defaults if empty
+      if (!newDate) {
+        const nextWeek = new Date()
+        nextWeek.setDate(nextWeek.getDate() + 7)
+        setNewDate(nextWeek.toISOString().split('T')[0])
+      }
+      if (!newStartTime) setNewStartTime('09:00')
+      if (!newEndTime) setNewEndTime('13:00')
+      if (!newManagerName) {
+        setNewManagerName(organizationName || 'Drive Coordinator')
+      }
+      if (!newManagerPhone) {
+        try {
+          const savedPhone = localStorage.getItem(`togethernow_user_phone_${userEmail}`)
+          setNewManagerPhone(savedPhone || '+91 98201 44521')
+        } catch {
+          setNewManagerPhone('+91 98201 44521')
+        }
+      }
+      if (!newLocation && !newIsRemote) {
+        setNewLocation('Marine Drive Promenade, Mumbai')
+      }
+      if (!newAddress && !newIsRemote) {
+        setNewAddress('Gate 2 Promenade, Marine Drive Coastal Stretch, Mumbai 400020')
+      }
+      setShowCreateModal(true)
+    }
+
     useImperativeHandle(ref, () => ({
       focusSearch: () => {
         searchInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
         searchInputRef.current?.focus()
       },
       openCreateModal: () => {
-        setShowCreateModal(true)
+        handleOpenCreateModal()
       },
     }))
 
@@ -799,16 +910,17 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         ? `${formatTime12H(newStartTime)} - ${formatTime12H(newEndTime)}`
         : newStartTime
         ? formatTime12H(newStartTime)
-        : 'Flexible Schedule'
+        : '09:00 AM - 01:00 PM'
 
       const totalReq = Math.max(1, Number(newTotalRequired) || 1)
       const alreadyReg = Math.max(0, Number(newAlreadyRegistered) || 0)
       const computedSpotsLeft = Math.max(0, totalReq - alreadyReg)
 
-      const managerName = newManagerName.trim()
-      const managerPhone = newManagerPhone.trim()
-      const fullAddress = newIsRemote ? 'Online / Remote' : (newAddress.trim() || newLocation.trim())
       const orgName = organizationName?.trim() || 'Organization'
+      const managerName = newManagerName.trim() || orgName || 'Drive Coordinator'
+      const managerPhone = newManagerPhone.trim() || '+91 98201 44521'
+      const location = newIsRemote ? 'Remote' : (newLocation.trim() || newAddress.trim() || 'Marine Drive, Mumbai')
+      const fullAddress = newIsRemote ? 'Online / Remote' : (newAddress.trim() || newLocation.trim() || 'Gate 2 Promenade, Marine Drive Coastal Stretch, Mumbai 400020')
 
       const newOpPayload: Opportunity = {
         id: `event-${Date.now()}`,
@@ -818,7 +930,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         isVerifiedOrg: true,
         orgStatus: 'approved',
         category: newCategory,
-        location: newIsRemote ? 'Remote' : newLocation.trim(),
+        location,
         address: fullAddress,
         managerName,
         managerPhone,
@@ -848,7 +960,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         const res = await createOpportunityAction({
           title: newTitle.trim(),
           category: newCategory,
-          location: newLocation.trim(),
+          location,
           address: fullAddress,
           managerName,
           managerPhone,
@@ -863,7 +975,19 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         })
 
         if (res.opportunity) {
-          const dbAssigned = res.opportunity
+          const dbAssigned: Opportunity = {
+            ...newOpPayload,
+            ...res.opportunity,
+            managerName: res.opportunity.managerName || newOpPayload.managerName,
+            managerPhone: res.opportunity.managerPhone || newOpPayload.managerPhone,
+            address: res.opportunity.address || newOpPayload.address,
+            location: res.opportunity.location || newOpPayload.location,
+            date: res.opportunity.date || newOpPayload.date,
+            time: res.opportunity.time || newOpPayload.time,
+            totalRequired: res.opportunity.totalRequired ?? newOpPayload.totalRequired,
+            alreadyRegistered: res.opportunity.alreadyRegistered ?? newOpPayload.alreadyRegistered,
+            spotsLeft: res.opportunity.spotsLeft ?? newOpPayload.spotsLeft,
+          }
           setOpportunities((prev) => [
             dbAssigned,
             ...prev.filter((o) => o.id !== newOpPayload.id && o.id !== dbAssigned.id),
@@ -973,7 +1097,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
           {userRole === 'organization' && (
             <button
               type="button"
-              onClick={() => setShowCreateModal(true)}
+              onClick={handleOpenCreateModal}
               className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all cursor-pointer border-none"
             >
               <Plus className="w-4 h-4" />
@@ -1072,10 +1196,16 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                 >
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-3">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 text-[11px] font-bold border border-emerald-200/50 dark:border-emerald-800/40">
                           {op.category}
                         </span>
+                        {op.isCompleted && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[10px] font-extrabold border border-emerald-300 dark:border-emerald-800/60">
+                            <CheckCircle2 className="w-2.5 h-2.5" />
+                            <span>Completed</span>
+                          </span>
+                        )}
                         {op.isCancelled && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 text-[10px] font-extrabold border border-rose-200 dark:border-rose-800/50">
                             <Ban className="w-2.5 h-2.5" />
@@ -1111,7 +1241,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                     <h4 className="text-base font-bold text-gray-900 dark:text-white m-0 group-hover:text-emerald-600 transition-colors line-clamp-2">
                       {op.title}
                     </h4>
-                    <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mt-1 mb-3">
+                    <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mt-1 mb-3 flex-wrap">
                       <Building2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                       <span className="font-semibold text-gray-700 dark:text-gray-300 truncate">{op.organization}</span>
                       {op.isVerifiedOrg !== false && op.orgStatus !== 'pending' && op.orgStatus !== 'rejected' && (
@@ -1123,6 +1253,35 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                           <span>Verified</span>
                         </span>
                       )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedOrgForAbout(op.organization)
+                          setAboutInitialTab('about')
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 hover:bg-indigo-600 hover:text-white dark:bg-indigo-950/70 dark:hover:bg-indigo-700 rounded-lg border border-indigo-200/80 dark:border-indigo-800/60 transition-all cursor-pointer shadow-xs shrink-0 ml-0.5"
+                        title="Know More about this Organization, their mission, previous events & photos"
+                      >
+                        <Info className="w-2.5 h-2.5" />
+                        <span>Know More</span>
+                      </button>
+
+                      {/* Overall Volunteer Rating Badge */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedOrgForAbout(op.organization)
+                          setAboutInitialTab('reviews')
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-extrabold text-amber-800 dark:text-amber-300 bg-amber-50 hover:bg-amber-500 hover:text-white dark:bg-amber-950/80 dark:hover:bg-amber-600 rounded-lg border border-amber-200/80 dark:border-amber-800/60 transition-all cursor-pointer shadow-xs shrink-0"
+                        title="View Volunteer Ratings & Reviews for this NGO"
+                      >
+                        <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
+                        <span>{getOrgRatingSummary(op.organization).averageRating}</span>
+                        <span className="text-[9px] opacity-75">({getOrgRatingSummary(op.organization).totalReviews})</span>
+                      </button>
                     </div>
 
                     {op.isCancelled && op.cancelReason && (
@@ -1167,25 +1326,26 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                         <span>{op.time}</span>
                       </div>
 
-                      {/* Event Manager Info */}
-                      {op.managerName && (
-                        <div className="pt-1.5 border-t border-gray-200/60 dark:border-gray-700/60 flex items-center justify-between text-[11px]">
-                          <span className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 font-semibold truncate">
-                            <UserCheck className="w-3 h-3 text-indigo-500 shrink-0" />
-                            <span className="truncate">In-Charge: {op.managerName}</span>
-                          </span>
-                          {op.managerPhone && (
-                            <a
-                              href={`tel:${op.managerPhone}`}
-                              onClick={(e) => e.stopPropagation()}
-                              className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline shrink-0"
-                            >
-                              <Phone className="w-3 h-3 text-emerald-500" />
-                              <span>{op.managerPhone}</span>
-                            </a>
-                          )}
-                        </div>
-                      )}
+                      {/* Event Manager Info - Always visible */}
+                      <div className="pt-2 border-t border-gray-200/70 dark:border-gray-700/60 flex items-center justify-between text-[11px]">
+                        <span className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 font-bold truncate">
+                          <UserCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                          <span className="truncate">In-Charge: {op.managerName || op.organization || 'Drive Coordinator'}</span>
+                        </span>
+                        {op.managerPhone ? (
+                          <a
+                            href={`tel:${op.managerPhone}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-600 hover:text-white transition-all shrink-0 text-decoration-none shadow-2xs"
+                            title={`Call In-Charge (${op.managerName || op.organization})`}
+                          >
+                            <Phone className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                            <span>{op.managerPhone}</span>
+                          </a>
+                        ) : (
+                          <span className="text-[10px] text-gray-400 font-medium">Phone on file</span>
+                        )}
+                      </div>
 
                       {/* Volunteer Capacity & Progress Bar */}
                       <div className="pt-1.5 border-t border-gray-200/60 dark:border-gray-700/60">
@@ -1242,49 +1402,69 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                     </div>
                   </div>
 
-                  {/* Card CTA Footer */}
-                  <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-                    {userRole === 'organization' ? (
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setManagingEvent(op)
-                          }}
-                          className="flex-1 py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs hover:shadow-md transition-all border-none cursor-pointer flex items-center justify-center gap-1.5"
-                        >
-                          <Users className="w-4 h-4" />
-                          <span>Manage ({eventApps.length})</span>
-                        </button>
+                    {/* Card CTA Footer */}
+                    <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+                      {userRole === 'organization' ? (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setManagingEvent(op)
+                            }}
+                            className="flex-1 py-2 px-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs hover:shadow-md transition-all border-none cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <Users className="w-3.5 h-3.5" />
+                            <span>Manage ({eventApps.length})</span>
+                          </button>
 
-                        {op.isCancelled ? (
-                          <button
-                            type="button"
-                            title="Restore Event"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleRestoreEvent(op.id)
-                            }}
-                            className="px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-bold text-xs border border-amber-200 dark:border-amber-800 hover:bg-amber-600 hover:text-white transition-all cursor-pointer flex items-center gap-1"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            title="Cancel Event"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setCancellingEvent(op)
-                            }}
-                            className="px-3 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 font-bold text-xs border border-rose-200 dark:border-rose-800 hover:bg-rose-600 hover:text-white transition-all cursor-pointer flex items-center gap-1"
-                          >
-                            <Ban className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    ) : op.isCancelled ? (
+                          {op.isCompleted ? (
+                            <span className="px-2.5 py-1.5 rounded-xl font-extrabold text-xs bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1 shrink-0 shadow-2xs">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Completed ✓</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              title="Mark as Completed"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setConfirmCompleteEvent(op)
+                              }}
+                              className="px-2.5 py-2 rounded-xl font-bold text-xs border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 hover:bg-emerald-600 hover:text-white transition-all cursor-pointer flex items-center gap-1 shrink-0 shadow-xs"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Complete</span>
+                            </button>
+                          )}
+
+                          {op.isCancelled ? (
+                            <button
+                              type="button"
+                              title="Restore Event"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleRestoreEvent(op.id)
+                              }}
+                              className="px-2.5 py-2 rounded-xl bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-bold text-xs border border-amber-200 dark:border-amber-800 hover:bg-amber-600 hover:text-white transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              title="Cancel Event"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setCancellingEvent(op)
+                              }}
+                              className="px-2.5 py-2 rounded-xl bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 font-bold text-xs border border-rose-200 dark:border-rose-800 hover:bg-rose-600 hover:text-white transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      ) : op.isCancelled ? (
                       <div className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-rose-100 dark:bg-rose-950/80 text-rose-800 dark:text-rose-200 font-bold text-xs border border-rose-200 dark:border-rose-900/50">
                         <Ban className="w-3.5 h-3.5 text-rose-600" />
                         <span>Event Cancelled 🚫</span>
@@ -1477,9 +1657,34 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                     <Phone className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                     <span><strong>Phone:</strong> {viewingEventModal.managerPhone || 'N/A'}</span>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                     <span><strong>Org:</strong> {viewingEventModal.organization}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedOrgForAbout(viewingEventModal.organization)
+                        setAboutInitialTab('about')
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-white dark:bg-gray-800 hover:bg-indigo-600 hover:text-white rounded-lg border border-indigo-200 dark:border-indigo-800 transition-all cursor-pointer shadow-2xs ml-1"
+                      title="Know More about this organization"
+                    >
+                      <Info className="w-2.5 h-2.5" />
+                      <span>Know More</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedOrgForAbout(viewingEventModal.organization)
+                        setAboutInitialTab('reviews')
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-extrabold text-amber-800 dark:text-amber-300 bg-amber-50 hover:bg-amber-500 hover:text-white dark:bg-amber-950/80 rounded-lg border border-amber-200/80 dark:border-amber-800/60 transition-all cursor-pointer shadow-2xs"
+                      title="View Volunteer Ratings & Reviews"
+                    >
+                      <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
+                      <span>{getOrgRatingSummary(viewingEventModal.organization).averageRating}</span>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1607,10 +1812,16 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
               
               <div className="flex items-start justify-between pb-4 border-b border-gray-100 dark:border-gray-800">
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold">
                       {managingEvent.category}
                     </span>
+                    {managingEvent.isCompleted && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[10px] font-extrabold flex items-center gap-1 border border-emerald-300 dark:border-emerald-800/60">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        <span>Completed Event</span>
+                      </span>
+                    )}
                     {managingEvent.isCancelled && (
                       <span className="px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 text-[10px] font-extrabold flex items-center gap-1">
                         <Ban className="w-3 h-3" />
@@ -1657,8 +1868,46 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                 </div>
               )}
 
+              {/* Event Schedule, In-Charge & Venue Details Box */}
+              <div className="bg-gray-50/80 dark:bg-gray-800/60 p-3.5 rounded-2xl border border-gray-100 dark:border-gray-800 my-3 space-y-2 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="flex items-center gap-1.5 text-gray-700 dark:text-gray-300">
+                    <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span><strong>Date:</strong> {managingEvent.date || 'Upcoming'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-gray-700 dark:text-gray-300">
+                    <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span><strong>Time:</strong> {managingEvent.time || '09:00 AM - 01:00 PM'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-gray-700 dark:text-gray-300">
+                    <UserCheck className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span className="truncate"><strong>In-Charge:</strong> {managingEvent.managerName || managingEvent.organization || 'Coordinator'}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-200/60 dark:border-gray-700/60">
+                  <div className="flex items-center gap-1.5 text-gray-700 dark:text-gray-300 truncate">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="truncate"><strong>Venue:</strong> {managingEvent.address || managingEvent.location}</span>
+                  </div>
+
+                  {!managingEvent.isRemote && (
+                    <a
+                      href={getGoogleMapsUrl(managingEvent.address || managingEvent.location)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white dark:bg-indigo-950/80 dark:text-indigo-300 dark:hover:bg-indigo-700 font-bold text-[10px] border border-indigo-200 dark:border-indigo-800 transition-all text-decoration-none shrink-0"
+                    >
+                      <Navigation className="w-2.5 h-2.5" />
+                      <span>Open on Maps</span>
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  )}
+                </div>
+              </div>
+
               {/* Event Statistics Summary Pills */}
-              <div className="grid grid-cols-4 gap-2.5 my-4">
+              <div className="grid grid-cols-4 gap-2.5 mb-4">
                 <div className="bg-gray-50 dark:bg-gray-800/60 p-2.5 rounded-2xl border border-gray-100 dark:border-gray-800 text-center">
                   <span className="block text-[10px] text-gray-500 dark:text-gray-400 font-medium">Total Applied</span>
                   <span className="text-base font-extrabold text-gray-900 dark:text-white">
@@ -1861,9 +2110,25 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                 )}
               </div>
 
-              {/* Modal Bottom Action Footer with Cancel Event Option */}
-              <div className="pt-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
-                <div>
+              {/* Modal Bottom Action Footer with Complete & Cancel Event Options */}
+              <div className="pt-4 border-t border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {managingEvent.isCompleted ? (
+                    <span className="px-4 py-2 rounded-xl font-extrabold text-xs bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1.5 shadow-2xs">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>✓ Completed (Concluded)</span>
+                    </span>
+                  ) : !managingEvent.isCancelled ? (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmCompleteEvent(managingEvent)}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs border-none transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Mark as Completed</span>
+                    </button>
+                  ) : null}
+
                   {managingEvent.isCancelled ? (
                     <button
                       type="button"
@@ -1871,7 +2136,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                       className="px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-600 text-amber-700 hover:text-white dark:bg-amber-950 dark:text-amber-300 font-bold text-xs border border-amber-200 dark:border-amber-800 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Restore from Cancelled Bucket</span>
+                      <span>Restore from Bucket</span>
                     </button>
                   ) : (
                     <button
@@ -1880,7 +2145,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                       className="px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white dark:bg-rose-950 dark:text-rose-300 font-bold text-xs border border-rose-200 dark:border-rose-800 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
                     >
                       <Ban className="w-3.5 h-3.5" />
-                      <span>Cancel Event / Move to Bucket</span>
+                      <span>Cancel Event</span>
                     </button>
                   )}
                 </div>
@@ -2393,6 +2658,89 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
             }
           }}
         />
+
+        {/* Organization About Us & Trust Modal (Know More & Reviews) */}
+        {selectedOrgForAbout && (
+          <OrganizationAboutModal
+            isOpen={Boolean(selectedOrgForAbout)}
+            onClose={() => setSelectedOrgForAbout(null)}
+            organizationName={selectedOrgForAbout}
+            initialTab={aboutInitialTab}
+            onExploreDrivesClick={(org) => {
+              setSelectedCategory('All')
+              setSearchQuery(org)
+              const el = document.getElementById('opportunities-feed')
+              if (el) el.scrollIntoView({ behavior: 'smooth' })
+            }}
+          />
+        )}
+
+        {/* Confirm Permanent Event Completion Modal */}
+        {confirmCompleteEvent && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs animate-in fade-in">
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 max-w-md w-full shadow-2xl border border-gray-100 dark:border-gray-800 space-y-4">
+              
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-2xl shrink-0">
+                  🎉
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-gray-900 dark:text-white m-0">
+                    Mark Event as Completed?
+                  </h3>
+                  <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                    {confirmCompleteEvent.organization}
+                  </span>
+                </div>
+              </div>
+
+              {/* Permanent Action Warning Box */}
+              <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+                <div className="flex items-center gap-1.5 font-black text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Permanent Action — Cannot Be Reopened</span>
+                </div>
+                <p className="m-0 text-[11px] text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
+                  Once confirmed as completed, this event will conclude permanently. Verified volunteer hours will be credited to all enrolled attendees and public volunteer ratings will open.
+                </p>
+              </div>
+
+              {/* Event Summary Card */}
+              <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 space-y-2 text-xs">
+                <div className="font-extrabold text-gray-900 dark:text-white text-sm">
+                  {confirmCompleteEvent.title}
+                </div>
+                <div className="flex items-center gap-3 text-gray-500 dark:text-gray-400 text-[11px] flex-wrap">
+                  <span>📅 {confirmCompleteEvent.date}</span>
+                  <span>📍 {confirmCompleteEvent.location}</span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                    👥 {applicants.filter((a) => a.eventId === confirmCompleteEvent.id && a.status === 'accepted').length} Accepted Volunteers
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-gray-100 dark:border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setConfirmCompleteEvent(null)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border-none bg-transparent cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => executeCompleteEvent(confirmCompleteEvent)}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md border-none cursor-pointer flex items-center gap-1.5 transition-all"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Yes, Confirm Completion</span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
 
       </section>
     )

@@ -17,11 +17,13 @@ import {
   XCircle,
   Users,
   Trash2,
-  X
+  X,
+  Building2
 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { logoutAction } from '@/app/actions/auth'
 import DeleteAccountModal from '@/components/ui/DeleteAccountModal'
+import OrganizationAboutEditorModal from '@/components/ui/OrganizationAboutEditorModal'
 import { getStoredNotifications, markAllNotificationsRead, deleteNotification, AppNotification } from '@/lib/notifications'
 
 interface DashboardNavbarProps {
@@ -52,6 +54,7 @@ export default function DashboardNavbar({
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [showAboutEditorModal, setShowAboutEditorModal] = useState(false)
   const [notifications, setNotifications] = useState<AppNotification[]>([])
 
   const fullName = user.user_metadata?.full_name ?? user.email ?? 'Member'
@@ -365,6 +368,20 @@ export default function DashboardNavbar({
 
                 {/* Actions */}
                 <div className="space-y-1">
+                  {role === 'organization' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowProfileMenu(false)
+                        setShowAboutEditorModal(true)
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-xl transition-colors border-none bg-transparent cursor-pointer text-left"
+                    >
+                      <Building2 className="w-4 h-4 text-emerald-600" />
+                      <span>About Us & Public Profile</span>
+                    </button>
+                  )}
+
                   <Link
                     href="/onboarding"
                     onClick={() => setShowProfileMenu(false)}
@@ -402,6 +419,16 @@ export default function DashboardNavbar({
 
         </div>
       </div>
+
+      {/* Organization About Us Editor Modal */}
+      {role === 'organization' && (
+        <OrganizationAboutEditorModal
+          isOpen={showAboutEditorModal}
+          onClose={() => setShowAboutEditorModal(false)}
+          organizationName={fullName}
+          organizationId={user.id}
+        />
+      )}
 
       {/* Account Deletion Confirmation Modal */}
       <DeleteAccountModal

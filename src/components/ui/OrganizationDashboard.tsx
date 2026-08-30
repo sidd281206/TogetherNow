@@ -6,6 +6,7 @@ import {
   Calendar, 
   Users, 
   CheckCircle, 
+  CheckCircle2,
   ShieldCheck, 
   XCircle, 
   ChevronRight, 
@@ -30,11 +31,15 @@ import {
   AlertTriangle,
   RotateCcw,
   Trash2,
-  Edit3
+  Edit3,
+  Star
 } from 'lucide-react'
 import ResubmitApplicationButton from '@/components/ui/ResubmitApplicationButton'
-import { updateApplicantStatusAction, cancelOpportunityAction, updateOpportunityContactAction } from '@/app/actions/opportunities'
+import { updateApplicantStatusAction, cancelOpportunityAction, updateOpportunityContactAction, markOpportunityCompletedAction } from '@/app/actions/opportunities'
 import { pushNotification } from '@/lib/notifications'
+import OrganizationAboutModal from '@/components/ui/OrganizationAboutModal'
+import OrganizationAboutEditorModal from '@/components/ui/OrganizationAboutEditorModal'
+import { getOrgRatingSummary } from '@/lib/ratings'
 
 interface OrganizationDashboardProps {
   opportunitiesRef?: React.RefObject<OpportunitiesFeedRef | null>
@@ -160,7 +165,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
   
   // All Drives View Modal
   const [showAllDrivesModal, setShowAllDrivesModal] = useState(false)
-  const [driveBucketTab, setDriveBucketTab] = useState<'active' | 'cancelled'>('active')
+  const [driveBucketTab, setDriveBucketTab] = useState<'active' | 'completed' | 'cancelled'>('active')
   const [driveSearchQuery, setDriveSearchQuery] = useState('')
   const [driveCategoryFilter, setDriveCategoryFilter] = useState('All')
   
@@ -173,6 +178,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
   // Cancel Event Confirmation Modal inside Dashboard
   const [cancellingDrive, setCancellingDrive] = useState<Opportunity | null>(null)
   const [cancelReasonInput, setCancelReasonInput] = useState('')
+  const [confirmCompleteDrive, setConfirmCompleteDrive] = useState<Opportunity | null>(null)
 
   // Edit Event Contact & In-Charge Modal
   const [editingContactDrive, setEditingContactDrive] = useState<Opportunity | null>(null)
@@ -180,6 +186,11 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
   const [editManagerPhone, setEditManagerPhone] = useState('')
   const [editAddress, setEditAddress] = useState('')
   const [isSavingContact, setIsSavingContact] = useState(false)
+
+  // Organization About Us Editor & Volunteer Preview Modal
+  const [showAboutEditorModal, setShowAboutEditorModal] = useState(false)
+  const [previewingAboutOrgName, setPreviewingAboutOrgName] = useState<string | null>(null)
+  const [aboutInitialTab, setAboutInitialTab] = useState<'about' | 'gallery' | 'pastEvents' | 'reviews' | 'contact'>('about')
 
   const handleOpenEditContact = (drive: Opportunity) => {
     setEditingContactDrive(drive)
@@ -285,18 +296,23 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     }
   }, [])
 
-  const activeDrives = opportunities.filter((op) => !op.isCancelled)
+  const activeDrives = opportunities.filter((op) => !op.isCancelled && !op.isCompleted)
+  const completedDrives = opportunities.filter((op) => !op.isCancelled && op.isCompleted)
   const cancelledDrives = opportunities.filter((op) => op.isCancelled)
 
-  const totalDrives = activeDrives.length
-  const totalVolunteersRegistered = activeDrives.reduce(
-    (acc, op) => acc + (op.alreadyRegistered ?? 0),
-    0
-  )
+  const totalDrives = opportunities.filter((op) => !op.isCancelled).length
+  const totalVolunteersRegistered = opportunities
+    .filter((op) => !op.isCancelled)
+    .reduce((acc, op) => acc + (op.alreadyRegistered ?? 0), 0)
   const totalCommunityHours = totalVolunteersRegistered * 4
 
   // Filter drives in the "All Drives" modal
-  const currentBucketDrives = driveBucketTab === 'active' ? activeDrives : cancelledDrives
+  const currentBucketDrives = 
+    driveBucketTab === 'active'
+      ? activeDrives
+      : driveBucketTab === 'completed'
+      ? completedDrives
+      : cancelledDrives
 
   const filteredDrives = currentBucketDrives.filter((op) => {
     const matchesSearch =
@@ -512,6 +528,59 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     }
   }
 
+  // Permanently Mark Event Completed (No reopening allowed once confirmed)
+  const executeCompleteDrive = (drive: Opportunity) => {
+    const completedTime = new Date().toISOString()
+
+    setOpportunities((prev) => {
+      const updated = prev.map((op) =>
+        op.id === drive.id
+          ? { ...op, isCompleted: true, completedAt: completedTime }
+          : op
+      )
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+        window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
+      } catch {}
+      return updated
+    })
+
+    const enrolled = applicants.filter((a) => a.eventId === drive.id && a.status === 'accepted')
+    enrolled.forEach((app) => {
+      pushNotification({
+        targetRole: 'volunteer',
+        type: 'approval',
+        eventId: drive.id,
+        eventTitle: drive.title,
+        title: '🎉 Event Completed!',
+        message: `"${drive.title}" has been marked as Completed by ${drive.organization}. Thank you for making an impact!`,
+      })
+    })
+
+    pushNotification({
+      targetRole: 'organization',
+      type: 'approval',
+      eventId: drive.id,
+      eventTitle: drive.title,
+      title: 'Event Marked as Completed',
+      message: `"${drive.title}" has been permanently marked as Completed.`,
+    })
+
+    markOpportunityCompletedAction({
+      eventId: drive.id,
+      isCompleted: true,
+      completedAt: completedTime,
+    }).catch((err) => console.warn('Notice updating event completion in DB:', err))
+
+    if (inspectingDrive?.id === drive.id) {
+      setInspectingDrive((prev) =>
+        prev ? { ...prev, isCompleted: true, completedAt: completedTime } : null
+      )
+    }
+
+    setConfirmCompleteDrive(null)
+  }
+
   return (
     <div className="space-y-8">
       {/* Organization Metric Cards */}
@@ -529,20 +598,28 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                   {totalDrives} Drives
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Active Drives Created
+                  Total Drives Created
                 </div>
               </div>
             </div>
 
-            {cancelledDrives.length > 0 && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60">
-                {cancelledDrives.length} in Bucket
-              </span>
-            )}
+            <div className="flex flex-col items-end gap-1">
+              {completedDrives.length > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 flex items-center gap-1">
+                  <CheckCircle2 className="w-2.5 h-2.5" />
+                  <span>{completedDrives.length} Done</span>
+                </span>
+              )}
+              {cancelledDrives.length > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60">
+                  {cancelledDrives.length} Bucket
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="pt-3 mt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
-            <span className="text-[11px] text-gray-400">View history & cancelled bucket</span>
+            <span className="text-[11px] text-gray-400">View active, completed & bucket</span>
             <button
               type="button"
               onClick={() => {
@@ -621,6 +698,78 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
         </div>
       )}
 
+      {/* Organization Public About Us & Work Showcase Card */}
+      <div className="p-5 rounded-3xl bg-gradient-to-r from-emerald-900 via-teal-900 to-emerald-950 text-white shadow-md border border-emerald-800/60 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-white flex items-center justify-center font-black text-xl shrink-0">
+            <Building2 className="w-6 h-6 text-emerald-300" />
+          </div>
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base sm:text-lg font-black text-white m-0">
+                {organizationName || 'Your Organization'} — About Us & Public Profile
+              </h3>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-200 text-[10px] font-bold border border-emerald-400/30">
+                Public Facing
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewingAboutOrgName(organizationName || 'Ocean & Earth Care Alliance')
+                  setAboutInitialTab('reviews')
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-400/25 border border-amber-300/40 text-amber-200 hover:text-white hover:bg-amber-400/40 text-xs font-bold transition-all cursor-pointer border-none"
+                title="View Volunteer Reviews"
+              >
+                <Star className="w-3 h-3 fill-amber-300 text-amber-300" />
+                <span>
+                  {getOrgRatingSummary(organizationName || 'Ocean & Earth Care Alliance').averageRating} / 5.0 (
+                  {getOrgRatingSummary(organizationName || 'Ocean & Earth Care Alliance').totalReviews} reviews)
+                </span>
+              </button>
+            </div>
+            <p className="text-xs text-emerald-100/80 m-0 max-w-2xl leading-relaxed">
+              Maintain your mission, impact milestones, ground work photos, and volunteer reviews. Volunteers see this when they click <strong>"Know More"</strong> next to your organization name.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <button
+            type="button"
+            onClick={() => {
+              setPreviewingAboutOrgName(organizationName || 'Ocean & Earth Care Alliance')
+              setAboutInitialTab('reviews')
+            }}
+            className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold text-xs border border-amber-400/30 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+          >
+            <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
+            <span>Volunteer Reviews</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setPreviewingAboutOrgName(organizationName || 'Ocean & Earth Care Alliance')
+              setAboutInitialTab('about')
+            }}
+            className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>Preview as Volunteer</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowAboutEditorModal(true)}
+            className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-black text-xs border-none transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>Edit About Us & Gallery</span>
+          </button>
+        </div>
+      </div>
+
       {/* Main Opportunities Feed for Organization */}
       <OpportunitiesFeed
         ref={opportunitiesRef}
@@ -661,12 +810,12 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
             </div>
 
             {/* Bucket Switcher Tabs */}
-            <div className="flex items-center justify-between gap-3 pt-3 pb-2 border-b border-gray-100 dark:border-gray-800">
-              <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 pb-2 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl flex-wrap">
                 <button
                   type="button"
                   onClick={() => setDriveBucketTab('active')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer flex items-center gap-1.5 ${
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border-none cursor-pointer flex items-center gap-1.5 ${
                     driveBucketTab === 'active'
                       ? 'bg-white dark:bg-gray-900 text-emerald-600 dark:text-emerald-400 shadow-sm'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-900'
@@ -678,19 +827,32 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
 
                 <button
                   type="button"
+                  onClick={() => setDriveBucketTab('completed')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border-none cursor-pointer flex items-center gap-1.5 ${
+                    driveBucketTab === 'completed'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Completed ({completedDrives.length})</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setDriveBucketTab('cancelled')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer flex items-center gap-1.5 ${
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border-none cursor-pointer flex items-center gap-1.5 ${
                     driveBucketTab === 'cancelled'
                       ? 'bg-rose-600 text-white shadow-sm'
                       : 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
                   }`}
                 >
                   <Ban className="w-3.5 h-3.5" />
-                  <span>Cancelled Events Bucket ({cancelledDrives.length})</span>
+                  <span>Cancelled ({cancelledDrives.length})</span>
                 </button>
               </div>
 
-              <div className="relative shrink-0 sm:w-60">
+              <div className="relative shrink-0 sm:w-56">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                 <input
                   type="text"
@@ -708,15 +870,23 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                 <div className="text-center py-12 px-4 bg-gray-50 dark:bg-gray-800/40 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700">
                   {driveBucketTab === 'active' ? (
                     <Calendar className="w-8 h-8 text-gray-400 mx-auto mb-2 opacity-60" />
+                  ) : driveBucketTab === 'completed' ? (
+                    <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-80" />
                   ) : (
                     <Ban className="w-8 h-8 text-rose-400 mx-auto mb-2 opacity-60" />
                   )}
                   <p className="text-sm font-bold text-gray-700 dark:text-gray-300 m-0">
-                    {driveBucketTab === 'active' ? 'No active drives found' : 'Cancelled Events Bucket is empty'}
+                    {driveBucketTab === 'active'
+                      ? 'No active drives found'
+                      : driveBucketTab === 'completed'
+                      ? 'No completed events yet'
+                      : 'Cancelled Events Bucket is empty'}
                   </p>
                   <p className="text-xs text-gray-400 m-0 mt-1">
                     {driveBucketTab === 'active'
                       ? 'Create a new opportunity or adjust your search filter.'
+                      : driveBucketTab === 'completed'
+                      ? 'Mark your concluded drives as completed to track organizational impact.'
                       : 'Events you cancel will appear here and can be restored anytime.'}
                   </p>
                 </div>
@@ -735,6 +905,8 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                       className={`p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 group ${
                         drive.isCancelled
                           ? 'border-rose-200 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/20 hover:border-rose-400'
+                          : drive.isCompleted
+                          ? 'border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/15 dark:bg-emerald-950/15 hover:border-emerald-400 shadow-xs'
                           : 'border-gray-200/80 dark:border-gray-700/80 bg-white dark:bg-gray-800/70 hover:border-emerald-500 shadow-xs hover:shadow-md'
                       }`}
                     >
@@ -743,6 +915,12 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                           <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
                             {drive.category}
                           </span>
+                          {drive.isCompleted && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-extrabold flex items-center gap-1 shadow-xs">
+                              <CheckCircle2 className="w-2.5 h-2.5" />
+                              <span>Completed Event</span>
+                            </span>
+                          )}
                           {drive.isCancelled && (
                             <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-extrabold flex items-center gap-1">
                               <Ban className="w-2.5 h-2.5" />
@@ -812,7 +990,28 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                           )}
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Mark as Completed Button / Permanent Completed Badge */}
+                          {drive.isCompleted ? (
+                            <span className="px-3 py-1.5 rounded-xl font-extrabold text-xs bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1.5 shadow-2xs">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Completed ✓</span>
+                            </span>
+                          ) : !drive.isCancelled ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setConfirmCompleteDrive(drive)
+                              }}
+                              className="px-3 py-1.5 rounded-xl font-bold text-xs border border-emerald-200 dark:border-emerald-800 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 hover:bg-emerald-600 hover:text-white transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                              title="Mark Drive as Completed"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Mark Completed</span>
+                            </button>
+                          ) : null}
+
                           <button
                             type="button"
                             onClick={(e) => {
@@ -897,10 +1096,16 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
             {/* Top Bar */}
             <div className="flex items-start justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
               <div className="space-y-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
                     {inspectingDrive.category}
                   </span>
+                  {inspectingDrive.isCompleted && (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-extrabold flex items-center gap-1 shadow-xs">
+                      <CheckCircle2 className="w-2.5 h-2.5" />
+                      <span>Completed Event</span>
+                    </span>
+                  )}
                   {inspectingDrive.isCancelled && (
                     <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center gap-1">
                       <Ban className="w-2.5 h-2.5" />
@@ -916,14 +1121,41 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                 </h3>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setInspectingDrive(null)}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 border-none bg-transparent cursor-pointer p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {!inspectingDrive.isCompleted && !inspectingDrive.isCancelled && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCompleteDrive(inspectingDrive)}
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs border-none cursor-pointer flex items-center gap-1.5 shadow-xs transition-all"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Mark as Completed</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setInspectingDrive(null)}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 border-none bg-transparent cursor-pointer p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
+
+            {inspectingDrive.isCompleted && (
+              <div className="my-2.5 p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-bold">This event has been marked as Completed</span>
+                </div>
+                {inspectingDrive.completedAt && (
+                  <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium">
+                    Concluded on {new Date(inspectingDrive.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                )}
+              </div>
+            )}
 
             {inspectingDrive.isCancelled && (
               <div className="my-2.5 p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/50 text-xs text-rose-900 dark:text-rose-200 flex items-start gap-2">
@@ -936,6 +1168,22 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                 </div>
               </div>
             )}
+
+            {/* Event Schedule Quick Pills */}
+            <div className="flex items-center gap-3 flex-wrap text-xs text-gray-600 dark:text-gray-300 py-1">
+              <div className="flex items-center gap-1.5 font-bold">
+                <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Date: {inspectingDrive.date || 'Upcoming'}</span>
+              </div>
+              <div className="flex items-center gap-1.5 font-bold">
+                <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Time: {inspectingDrive.time || '09:00 AM - 01:00 PM'}</span>
+              </div>
+              <div className="flex items-center gap-1.5 font-bold text-indigo-600 dark:text-indigo-400">
+                <Users className="w-3.5 h-3.5 shrink-0" />
+                <span>Capacity: {inspectingDrive.alreadyRegistered ?? 0} / {inspectingDrive.totalRequired ?? 20} Volunteers</span>
+              </div>
+            </div>
 
             {/* Coordinator & Venue Grid with Map */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 my-3">
@@ -1162,9 +1410,26 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
               )}
             </div>
 
-            {/* Inspection Modal Footer with Cancel Option */}
-            <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
-              <div>
+            {/* Inspection Modal Footer with Complete & Cancel Options */}
+            <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Mark as Completed Button */}
+                {inspectingDrive.isCompleted ? (
+                  <span className="px-4 py-2 rounded-xl font-extrabold text-xs bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1.5 shadow-2xs">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>✓ Completed (Concluded)</span>
+                  </span>
+                ) : !inspectingDrive.isCancelled ? (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCompleteDrive(inspectingDrive)}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs border-none transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Mark as Completed</span>
+                  </button>
+                ) : null}
+
                 {inspectingDrive.isCancelled ? (
                   <button
                     type="button"
@@ -1172,7 +1437,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                     className="px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-600 text-amber-700 hover:text-white dark:bg-amber-950 dark:text-amber-300 font-bold text-xs border border-amber-200 dark:border-amber-800 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Restore Event from Bucket</span>
+                    <span>Restore from Bucket</span>
                   </button>
                 ) : (
                   <button
@@ -1181,7 +1446,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                     className="px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white dark:bg-rose-950 dark:text-rose-300 font-bold text-xs border border-rose-200 dark:border-rose-800 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
                   >
                     <Ban className="w-3.5 h-3.5" />
-                    <span>Cancel Event & Move to Bucket</span>
+                    <span>Cancel Event</span>
                   </button>
                 )}
               </div>
@@ -1367,6 +1632,92 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Organization About Us Editor Modal */}
+      <OrganizationAboutEditorModal
+        isOpen={showAboutEditorModal}
+        onClose={() => setShowAboutEditorModal(false)}
+        organizationName={organizationName || 'Your Organization'}
+        organizationId={userId}
+      />
+
+      {/* Volunteer Facing Preview Modal */}
+      {previewingAboutOrgName && (
+        <OrganizationAboutModal
+          isOpen={Boolean(previewingAboutOrgName)}
+          onClose={() => setPreviewingAboutOrgName(null)}
+          organizationName={previewingAboutOrgName}
+          organizationId={userId}
+          initialTab={aboutInitialTab}
+        />
+      )}
+
+      {/* Confirm Permanent Event Completion Modal */}
+      {confirmCompleteDrive && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 max-w-md w-full shadow-2xl border border-gray-100 dark:border-gray-800 space-y-4">
+            
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-2xl shrink-0">
+                🎉
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-gray-900 dark:text-white m-0">
+                  Mark Event as Completed?
+                </h3>
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                  {confirmCompleteDrive.organization}
+                </span>
+              </div>
+            </div>
+
+            {/* Permanent Action Warning Box */}
+            <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+              <div className="flex items-center gap-1.5 font-black text-amber-800 dark:text-amber-300">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Permanent Action — Cannot Be Reopened</span>
+              </div>
+              <p className="m-0 text-[11px] text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
+                Once confirmed as completed, this event will conclude permanently. Verified volunteer hours will be credited to all present attendees and public volunteer reviews will open.
+              </p>
+            </div>
+
+            {/* Event Summary Card */}
+            <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 space-y-2 text-xs">
+              <div className="font-extrabold text-gray-900 dark:text-white text-sm">
+                {confirmCompleteDrive.title}
+              </div>
+              <div className="flex items-center gap-3 text-gray-500 dark:text-gray-400 text-[11px] flex-wrap">
+                <span>📅 {confirmCompleteDrive.date}</span>
+                <span>📍 {confirmCompleteDrive.location}</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                  👥 {applicants.filter((a) => a.eventId === confirmCompleteDrive.id && a.status === 'accepted').length} Accepted Volunteers
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-gray-100 dark:border-gray-800">
+              <button
+                type="button"
+                onClick={() => setConfirmCompleteDrive(null)}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border-none bg-transparent cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => executeCompleteDrive(confirmCompleteDrive)}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md border-none cursor-pointer flex items-center gap-1.5 transition-all"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Yes, Confirm Completion</span>
+              </button>
+            </div>
+
           </div>
         </div>
       )}

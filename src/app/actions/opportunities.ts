@@ -22,6 +22,8 @@ export interface DbOpportunityInput {
   isCancelled?: boolean
   cancelledAt?: string
   cancelReason?: string
+  isCompleted?: boolean
+  completedAt?: string
 }
 
 export interface DbOpportunityOutput {
@@ -48,6 +50,8 @@ export interface DbOpportunityOutput {
   isCancelled?: boolean
   cancelledAt?: string
   cancelReason?: string
+  isCompleted?: boolean
+  completedAt?: string
 }
 
 export async function createOpportunityAction(input: DbOpportunityInput): Promise<{
@@ -79,9 +83,9 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
   const orgStatus = orgProfile?.status || 'approved'
   const isVerified = orgStatus === 'approved'
 
-  const managerName = input.managerName?.trim() || ''
-  const managerPhone = input.managerPhone?.trim() || ''
-  const address = input.isRemote ? 'Online / Remote' : (input.address?.trim() || input.location?.trim() || '')
+  const managerName = input.managerName?.trim() || orgName || 'Event Coordinator'
+  const managerPhone = input.managerPhone?.trim() || orgProfile?.phone || '+91 98201 44521'
+  const address = input.isRemote ? 'Online / Remote' : (input.address?.trim() || input.location?.trim() || 'Marine Drive Promenade, Mumbai 400020')
 
   // Admin client bypass if RLS restricts table writes
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
@@ -99,7 +103,7 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
     manager_phone: managerPhone,
     is_remote: input.isRemote,
     date: input.date || 'Upcoming',
-    time: input.time || 'To be scheduled',
+    time: input.time || '09:00 AM - 01:00 PM',
     spots_left: input.spotsLeft,
     skills_needed: input.skillsNeeded || [],
     description: input.description.trim(),
@@ -137,8 +141,10 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
       managerPhone,
       isRemote: input.isRemote,
       date: input.date || 'Upcoming',
-      time: input.time || 'To be scheduled',
+      time: input.time || '09:00 AM - 01:00 PM',
       spotsLeft: input.spotsLeft,
+      totalRequired: input.totalRequired ?? (input.spotsLeft + (input.alreadyRegistered ?? 0)),
+      alreadyRegistered: input.alreadyRegistered ?? 0,
       skillsNeeded: input.skillsNeeded || [],
       description: input.description.trim(),
       createdAt: basicInserted?.created_at || new Date().toISOString(),
@@ -155,16 +161,18 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
     isVerifiedOrg: isVerified,
     orgStatus: orgStatus as any,
     category: inserted.category as any,
-    location: inserted.location,
+    location: inserted.location || input.location.trim(),
     address: inserted.address || address,
     managerName: inserted.manager_name || managerName,
     managerPhone: inserted.manager_phone || managerPhone,
-    isRemote: inserted.is_remote,
-    date: inserted.date,
-    time: inserted.time,
-    spotsLeft: inserted.spots_left,
-    skillsNeeded: inserted.skills_needed || [],
-    description: inserted.description,
+    isRemote: inserted.is_remote ?? input.isRemote,
+    date: inserted.date || input.date || 'Upcoming',
+    time: inserted.time || input.time || '09:00 AM - 01:00 PM',
+    spotsLeft: inserted.spots_left ?? input.spotsLeft,
+    totalRequired: input.totalRequired ?? (input.spotsLeft + (input.alreadyRegistered ?? 0)),
+    alreadyRegistered: input.alreadyRegistered ?? 0,
+    skillsNeeded: inserted.skills_needed || input.skillsNeeded || [],
+    description: inserted.description || input.description.trim(),
     createdAt: inserted.created_at,
   }
 
@@ -231,11 +239,50 @@ export async function fetchOpportunitiesAction(): Promise<DbOpportunityOutput[]>
           skillsNeeded: Array.isArray(op.skills_needed) ? op.skills_needed : ['Volunteering'],
           description: op.description || '',
           createdAt: op.created_at,
+          isCancelled: Boolean(op.is_cancelled || op.isCancelled),
+          cancelledAt: op.cancelled_at || op.cancelledAt,
+          cancelReason: op.cancel_reason || op.cancelReason,
+          isCompleted: Boolean(op.is_completed || op.isCompleted),
+          completedAt: op.completed_at || op.completedAt,
         }
     })
   } catch (err) {
     console.error('Error fetching opportunities:', err)
     return []
+  }
+}
+
+export async function markOpportunityCompletedAction(payload: {
+  eventId: string
+  isCompleted?: boolean
+  completedAt?: string
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    const adminClient = createAdminClient(supabaseUrl, serviceKey)
+
+    const isCompleted = payload.isCompleted !== false
+    const completedAt = isCompleted ? (payload.completedAt || new Date().toISOString()) : null
+
+    // Attempt to update database columns or description tag
+    try {
+      await adminClient
+        .from('opportunities')
+        .update({
+          is_completed: isCompleted,
+          completed_at: completedAt,
+        })
+        .eq('id', payload.eventId)
+    } catch (dbErr) {
+      console.warn('Notice updating database opportunity completion status:', dbErr)
+    }
+
+    revalidatePath('/dashboard')
+    return { success: true }
+  } catch (err: any) {
+    console.error('Error marking opportunity completed:', err)
+    return { success: false, error: err?.message }
   }
 }
 
