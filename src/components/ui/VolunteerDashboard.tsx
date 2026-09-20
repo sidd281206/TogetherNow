@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from 'react'
 import OpportunitiesFeed, { OpportunitiesFeedRef, Applicant, Opportunity, INITIAL_OPPORTUNITIES } from '@/components/ui/OpportunitiesFeed'
+import { fetchOpportunitiesAction, fetchUserApplicationsAction } from '@/app/actions/opportunities'
+import { createClient } from '@/lib/supabase/client'
 import { 
   Award, 
   Clock, 
@@ -33,6 +35,7 @@ import { getOrgRatingSummary, hasVolunteerReviewedEvent } from '@/lib/ratings'
 
 interface VolunteerDashboardProps {
   opportunitiesRef?: React.RefObject<OpportunitiesFeedRef | null>
+  userId?: string
   userEmail?: string
   userName?: string
   profileStatus?: {
@@ -50,7 +53,12 @@ function getGoogleMapsUrl(addressOrLocation: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressOrLocation)}`
 }
 
-export default function VolunteerDashboard({ opportunitiesRef, userEmail, userName, profileStatus }: VolunteerDashboardProps) {
+export default function VolunteerDashboard({ opportunitiesRef, userId, userEmail, userName, profileStatus }: VolunteerDashboardProps) {
+  // Scope ALL localStorage keys by userId so data is never shared between accounts
+  const userScopeId = userId || userEmail || 'guest'
+  const APPLICANTS_KEY = `togethernow_event_applicants_v1_${userScopeId}`
+  const OPPORTUNITIES_KEY = `togethernow_posted_opportunities`  // opportunities are global (org posts them)
+  const NOTIFICATIONS_KEY = `togethernow_notifications_v1_${userScopeId}`
   const [userApplications, setUserApplications] = useState<Applicant[]>([])
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [notifications, setNotifications] = useState<AppNotification[]>([])
@@ -61,15 +69,51 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
 
   const refreshData = () => {
     try {
-      const localApps = localStorage.getItem(APPLICANTS_STORAGE_KEY)
+      let apps: Applicant[] = []
+
+      // 1. Read from user-scoped storage key
+      const localApps = localStorage.getItem(APPLICANTS_KEY)
       if (localApps) {
-        const parsed: Applicant[] = JSON.parse(localApps)
-        if (Array.isArray(parsed)) {
-          setUserApplications(parsed)
-        }
+        try {
+          const parsed = JSON.parse(localApps)
+          if (Array.isArray(parsed)) {
+            apps = parsed
+          }
+        } catch {}
       }
 
-      const localOps = localStorage.getItem(OPPORTUNITIES_STORAGE_KEY)
+      // 2. Also check global storage key for this specific volunteer's applications
+      // (in case an org approved/declined an applicant in the global storage or another tab updated it)
+      const globalAppsRaw = localStorage.getItem(APPLICANTS_STORAGE_KEY)
+      if (globalAppsRaw) {
+        try {
+          const parsedGlobal: Applicant[] = JSON.parse(globalAppsRaw)
+          if (Array.isArray(parsedGlobal)) {
+            const myGlobalApps = parsedGlobal.filter((a) => {
+              if (userId && a.volunteerId && a.volunteerId === userId) return true
+              if (userEmail && a.email && a.email.trim().toLowerCase() === userEmail.trim().toLowerCase()) return true
+              return false
+            })
+            const mergedMap = new Map<string, Applicant>()
+            apps.forEach((a) => mergedMap.set(a.id, a))
+            myGlobalApps.forEach((a) => mergedMap.set(a.id, a))
+            apps = Array.from(mergedMap.values())
+          }
+        } catch {}
+      }
+
+      // 3. Strictly filter so ONLY this volunteer's applications are ever displayed
+      const myApps = apps.filter((a) => {
+        if (userId && a.volunteerId && a.volunteerId === userId) return true
+        if (userEmail && a.email && a.email.trim().toLowerCase() === userEmail.trim().toLowerCase()) return true
+        return false
+      })
+      setUserApplications(myApps)
+      try {
+        localStorage.setItem(APPLICANTS_KEY, JSON.stringify(myApps))
+      } catch {}
+
+      const localOps = localStorage.getItem(OPPORTUNITIES_KEY)
       if (localOps) {
         const parsedOps: Opportunity[] = JSON.parse(localOps)
         if (Array.isArray(parsedOps) && parsedOps.length > 0) {
@@ -77,31 +121,133 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
         }
       }
 
-      const notifs = getStoredNotifications('volunteer')
-      setNotifications(notifs)
+      // Read notifications strictly for this volunteer
+      const notifs = getStoredNotifications('volunteer', NOTIFICATIONS_KEY, { userId, userEmail })
+      const globalNotifs = getStoredNotifications('volunteer', undefined, { userId, userEmail })
+      const notifMap = new Map<string, AppNotification>()
+      notifs.forEach((n) => notifMap.set(n.id, n))
+      globalNotifs.forEach((n) => {
+        if (n.targetUserId || n.targetEmail) {
+          const match = (userId && n.targetUserId === userId) || (userEmail && n.targetEmail?.toLowerCase() === userEmail.toLowerCase())
+          if (match) notifMap.set(n.id, n)
+        } else if (n.targetRole === 'volunteer' && n.type === 'general') {
+          notifMap.set(n.id, n)
+        }
+      })
+      setNotifications(Array.from(notifMap.values()))
     } catch (e) {
       console.warn('Error reading dashboard state:', e)
     }
   }
 
+  const syncWithDb = async () => {
+    try {
+      // 1. Fetch live opportunities so seat counts (spotsLeft, alreadyRegistered) are strictly synchronized
+      const dbOps = await fetchOpportunitiesAction()
+      if (dbOps && dbOps.length > 0) {
+        setOpportunities((prev) => {
+          const map = new Map<string, Opportunity>()
+          prev.forEach((op) => map.set(op.id, op))
+          dbOps.forEach((dbOp) => {
+            const existing = map.get(dbOp.id)
+            if (existing) {
+              map.set(dbOp.id, {
+                ...existing,
+                ...dbOp,
+                date: (dbOp.date && dbOp.date !== 'Upcoming') ? dbOp.date : (existing.date || dbOp.date || 'Upcoming'),
+                time: (dbOp.time && dbOp.time !== 'Flexible' && dbOp.time !== 'To be scheduled') ? dbOp.time : (existing.time || dbOp.time || '09:00 AM - 01:00 PM'),
+                address: (dbOp.address && dbOp.address !== 'Local Community Center' && dbOp.address !== 'Remote') ? dbOp.address : (existing.address || dbOp.address || existing.location),
+                location: dbOp.location || existing.location || 'Local Community Center',
+                managerName: (dbOp.managerName && dbOp.managerName !== 'Event Coordinator' && dbOp.managerName !== 'Coordinator') ? dbOp.managerName : (existing.managerName || dbOp.managerName),
+                managerPhone: dbOp.managerPhone ? dbOp.managerPhone : (existing.managerPhone || ''),
+              })
+            } else {
+              map.set(dbOp.id, dbOp as Opportunity)
+            }
+          })
+          const merged = Array.from(map.values())
+          try {
+            localStorage.setItem(OPPORTUNITIES_KEY, JSON.stringify(merged))
+          } catch {}
+          return merged
+        })
+      }
+
+      // 2. Fetch live applications strictly for this volunteer from Supabase DB
+      const dbUserApps = await fetchUserApplicationsAction(userId, userEmail)
+      if (dbUserApps && dbUserApps.length > 0) {
+        setUserApplications((prev) => {
+          const map = new Map<string, Applicant>()
+          // Preserve local applications
+          prev.forEach((a) => map.set(a.id, a))
+          // Overlay DB applications (DB status takes authority)
+          dbUserApps.forEach((a) => {
+            map.set(a.id, a as Applicant)
+          })
+          const merged = Array.from(map.values())
+          try {
+            localStorage.setItem(APPLICANTS_KEY, JSON.stringify(merged))
+          } catch {}
+          return merged
+        })
+      }
+    } catch (err) {
+      console.warn('Notice syncing volunteer dashboard with DB:', err)
+    }
+  }
+
   useEffect(() => {
     refreshData()
-    window.addEventListener('togethernow_new_notification', refreshData)
-    window.addEventListener('togethernow_opportunities_updated', refreshData)
-    window.addEventListener('storage', refreshData)
-    return () => {
-      window.removeEventListener('togethernow_new_notification', refreshData)
-      window.removeEventListener('togethernow_opportunities_updated', refreshData)
-      window.removeEventListener('storage', refreshData)
+    syncWithDb()
+
+    const handleFocusSync = () => {
+      refreshData()
+      syncWithDb()
     }
-  }, [])
+
+    window.addEventListener('togethernow_new_notification', handleFocusSync)
+    window.addEventListener('togethernow_opportunities_updated', handleFocusSync)
+    window.addEventListener('storage', handleFocusSync)
+    window.addEventListener('focus', handleFocusSync)
+
+    // Realtime Supabase postgres listener for live seat updates & application approvals
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`vol-dashboard-sync-${userScopeId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'opportunities' }, () => {
+        syncWithDb()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
+        syncWithDb()
+      })
+      .subscribe()
+
+    const pollTimer = setInterval(() => {
+      syncWithDb()
+    }, 5000)
+
+    return () => {
+      window.removeEventListener('togethernow_new_notification', handleFocusSync)
+      window.removeEventListener('togethernow_opportunities_updated', handleFocusSync)
+      window.removeEventListener('storage', handleFocusSync)
+      window.removeEventListener('focus', handleFocusSync)
+      supabase.removeChannel(channel)
+      clearInterval(pollTimer)
+    }
+  }, [userScopeId])
 
   const approvedDrives = userApplications.filter((a) => a.status === 'accepted')
   const pendingDrives = userApplications.filter((a) => a.status === 'pending')
   const totalHours = approvedDrives.length * 4
   const badgeCount = approvedDrives.length > 0 ? Math.min(5, approvedDrives.length) : 0
 
-  const latestApprovalNotification = notifications.find((n) => n.type === 'approval')
+  const latestApprovalNotification = notifications.find((n) =>
+    n.type === 'approval' && (
+      (userId && n.targetUserId === userId) ||
+      (userEmail && n.targetEmail?.toLowerCase() === userEmail.toLowerCase()) ||
+      (!n.targetUserId && !n.targetEmail && userApplications.some((a) => a.eventId === n.eventId && a.status === 'accepted'))
+    )
+  )
 
   return (
     <div className="space-y-8">
@@ -197,8 +343,14 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
               const alreadyRegistered = matchedOp?.alreadyRegistered ?? (app.status === 'accepted' ? 1 : 0)
               const spotsLeft = matchedOp ? matchedOp.spotsLeft : Math.max(0, totalRequired - alreadyRegistered)
               const percentFilled = Math.min(100, Math.round((alreadyRegistered / Math.max(1, totalRequired)) * 100))
-              const orgName = matchedOp?.organization || 'Community Non-Profit Organization'
-              const managerName = matchedOp?.managerName || 'Drive Coordinator'
+              const orgName = (matchedOp?.organization && matchedOp.organization !== 'Organization')
+                ? matchedOp.organization
+                : 'Community Non-Profit Organization'
+              // Manager name is independent of org name — never echo the org name here
+              const GENERIC_MANAGER = ['Organization', 'Event Coordinator', 'Drive Coordinator', 'Community Organization', 'Community Non-Profit Organization']
+              const managerName = (matchedOp?.managerName && !GENERIC_MANAGER.includes(matchedOp.managerName))
+                ? matchedOp.managerName
+                : 'Event Coordinator'
               const managerPhone = matchedOp?.managerPhone || '+91 98201 44521'
               const address = matchedOp?.address || matchedOp?.location || 'Marine Drive Coastal Stretch, Mumbai 400020'
               const isRemote = Boolean(matchedOp?.isRemote)
@@ -523,7 +675,9 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
                       Person in Charge / Event Manager
                     </span>
                     <h5 className="text-sm font-extrabold text-gray-900 dark:text-white m-0">
-                      {viewingOpportunity.managerName || viewingOpportunity.organization}
+                      {(viewingOpportunity.managerName && viewingOpportunity.managerName !== viewingOpportunity.organization)
+                        ? viewingOpportunity.managerName
+                        : 'Event Coordinator'}
                     </h5>
                   </div>
                 </div>
@@ -654,6 +808,7 @@ export default function VolunteerDashboard({ opportunitiesRef, userEmail, userNa
       <OpportunitiesFeed
         ref={opportunitiesRef}
         userRole="volunteer"
+        userId={userId}
         userEmail={userEmail}
         userProfileStatus={profileStatus}
       />

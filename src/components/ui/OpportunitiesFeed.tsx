@@ -49,6 +49,7 @@ import { pushNotification } from '@/lib/notifications'
 import ProfileCompletionModal from './ProfileCompletionModal'
 import OrganizationAboutModal from '@/components/ui/OrganizationAboutModal'
 import { getOrgRatingSummary } from '@/lib/ratings'
+import { createClient } from '@/lib/supabase/client'
 
 export interface Opportunity {
   id: string
@@ -330,6 +331,13 @@ const INITIAL_APPLICANTS: Applicant[] = [
 
 const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProps>(
   ({ userRole = 'volunteer', organizationName, userId, userEmail = 'volunteer@togethernow.org', userProfileStatus }, ref) => {
+    const isCurrentUserApplicant = (a: Applicant) => {
+      if (userId && a.volunteerId && a.volunteerId === userId) return true
+      if (userEmail && a.email && a.email.trim().toLowerCase() === userEmail.trim().toLowerCase()) return true
+      if (userEmail && a.volunteerId && a.volunteerId.trim().toLowerCase() === userEmail.trim().toLowerCase()) return true
+      return false
+    }
+
     const [opportunities, setOpportunities] = useState<Opportunity[]>(INITIAL_OPPORTUNITIES)
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedCategory, setSelectedCategory] = useState('All')
@@ -443,6 +451,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
               const merged = Array.from(idMap.values())
               try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
+                window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: merged }))
               } catch {}
               return merged
             })
@@ -453,98 +462,153 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       }
       loadDbOps()
 
-      const handleStorageUpdate = () => {
+      const handleStorageUpdate = (e?: any) => {
         try {
+          if (e?.detail && Array.isArray(e.detail)) {
+            setOpportunities(e.detail)
+          } else {
+            const localSaved = localStorage.getItem(STORAGE_KEY)
+            if (localSaved) {
+              const parsedOps: Opportunity[] = JSON.parse(localSaved)
+              if (Array.isArray(parsedOps) && parsedOps.length > 0) {
+                setOpportunities(parsedOps)
+              }
+            }
+          }
+
           const localApps = localStorage.getItem(APPLICANTS_STORAGE_KEY)
           if (localApps) {
             const parsedApps: Applicant[] = JSON.parse(localApps)
             if (Array.isArray(parsedApps)) setApplicants(parsedApps)
           }
-
-          const localSaved = localStorage.getItem(STORAGE_KEY)
-          if (localSaved) {
-            const parsedOps: Opportunity[] = JSON.parse(localSaved)
-            if (Array.isArray(parsedOps) && parsedOps.length > 0) {
-              setOpportunities(parsedOps)
-            }
-          }
         } catch {}
+      }
+
+      const handleFocusSync = () => {
+        handleStorageUpdate()
+        loadDbOps()
       }
 
       window.addEventListener('togethernow_new_notification', handleStorageUpdate)
       window.addEventListener('togethernow_opportunities_updated', handleStorageUpdate)
       window.addEventListener('storage', handleStorageUpdate)
+      window.addEventListener('focus', handleFocusSync)
+
+      // Realtime Supabase postgres listener for live seat availability across all devices & users
+      const supabase = createClient()
+      const channel = supabase
+        .channel('opportunities-global-seats-sync')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'opportunities' },
+          () => {
+            loadDbOps()
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'applications' },
+          () => {
+            loadDbOps()
+          }
+        )
+        .subscribe()
+
+      // Periodic poll every 5s to guarantee consistent live seat availability across all clients
+      const pollTimer = setInterval(() => {
+        loadDbOps()
+      }, 5000)
+
       return () => {
         window.removeEventListener('togethernow_new_notification', handleStorageUpdate)
         window.removeEventListener('togethernow_opportunities_updated', handleStorageUpdate)
         window.removeEventListener('storage', handleStorageUpdate)
+        window.removeEventListener('focus', handleFocusSync)
+        supabase.removeChannel(channel)
+        clearInterval(pollTimer)
       }
     }, [])
 
     // Handle Organization Tick (Approve) & Cross (Decline) Actions
     const handleApplicantStatus = (applicantId: string, status: 'accepted' | 'declined', event?: Opportunity) => {
-      let targetApp: Applicant | undefined
-      let previousStatus: string | undefined
-      
+      // Read current state synchronously BEFORE any setState calls
+      const currentApplicant = applicants.find((a) => a.id === applicantId)
+
+      // Idempotency guard: do nothing if already at target status
+      if (currentApplicant?.status === status) return
+
+      // Capture previous status synchronously — this MUST happen before any setState
+      const previousStatus = currentApplicant?.status
+      const targetApp: Applicant = { ...currentApplicant!, status }
+
+      // 1. Update applicants state (pure updater — no side effects)
       setApplicants((prev) => {
-        const updated = prev.map((a) => {
-          if (a.id === applicantId) {
-            previousStatus = a.status
-            targetApp = { ...a, status }
-            return targetApp
-          }
-          return a
-        })
+        const updated = prev.map((a) => (a.id === applicantId ? { ...a, status } : a))
         try {
+          // Write to global org-facing key
           localStorage.setItem(APPLICANTS_STORAGE_KEY, JSON.stringify(updated))
+
+          // Also propagate the status change to the volunteer's user-scoped key(s)
+          // so their dashboard reflects approval/decline without cross-user contamination
+          const vId = targetApp.volunteerId
+          const vEmail = targetApp.email
+          const keysToUpdate = new Set<string>()
+          if (vId) keysToUpdate.add(`togethernow_event_applicants_v1_${vId}`)
+          if (vEmail) keysToUpdate.add(`togethernow_event_applicants_v1_${vEmail}`)
+
+          keysToUpdate.forEach((userAppsKey) => {
+            try {
+              const existingRaw = localStorage.getItem(userAppsKey)
+              if (existingRaw) {
+                const existingApps: Applicant[] = JSON.parse(existingRaw)
+                const updatedUserApps = existingApps.map((a) =>
+                  a.id === applicantId ? { ...a, status } : a
+                )
+                localStorage.setItem(userAppsKey, JSON.stringify(updatedUserApps))
+              }
+            } catch {}
+          })
         } catch {}
         return updated
       })
 
       const ev = event || managingEvent
       if (ev) {
+        // Compute the spot delta once, based on synchronously-read previousStatus
+        const shouldIncrement = status === 'accepted' && previousStatus !== 'accepted'
+        const shouldDecrement = status === 'declined' && previousStatus === 'accepted'
+        const currentReg = ev.alreadyRegistered ?? 0
+        const totalReq = ev.totalRequired ?? (ev.spotsLeft + currentReg)
+        const newReg = shouldIncrement
+          ? currentReg + 1
+          : shouldDecrement
+          ? Math.max(0, currentReg - 1)
+          : currentReg
+        const newSpots = Math.max(0, totalReq - newReg)
+
+        // 2. Update opportunities spots (pure updater — dispatch event OUTSIDE)
         setOpportunities((prev) => {
           const updated = prev.map((o) => {
-            if (o.id === ev.id) {
-              const currentReg = o.alreadyRegistered ?? 0
-              const totalReq = o.totalRequired ?? (o.spotsLeft + currentReg)
-              let newReg = currentReg
-
-              if (status === 'accepted' && previousStatus !== 'accepted') {
-                newReg = currentReg + 1
-              } else if (status === 'declined' && previousStatus === 'accepted') {
-                newReg = Math.max(0, currentReg - 1)
-              }
-
-              const newSpots = Math.max(0, totalReq - newReg)
-              return {
-                ...o,
-                alreadyRegistered: newReg,
-                spotsLeft: newSpots,
-              }
+            if (o.id !== ev.id) return o
+            return {
+              ...o,
+              alreadyRegistered: newReg,
+              spotsLeft: newSpots,
             }
-            return o
           })
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-            window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
+            // Defer the event dispatch so it doesn't fire inside a state updater
+            queueMicrotask(() => {
+              window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
+            })
           } catch {}
           return updated
         })
 
+        // 3. Update managing event spots (pure updater)
         setManagingEvent((prevEv) => {
           if (!prevEv || prevEv.id !== ev.id) return prevEv
-          const currentReg = prevEv.alreadyRegistered ?? 0
-          const totalReq = prevEv.totalRequired ?? (prevEv.spotsLeft + currentReg)
-          let newReg = currentReg
-
-          if (status === 'accepted' && previousStatus !== 'accepted') {
-            newReg = currentReg + 1
-          } else if (status === 'declined' && previousStatus === 'accepted') {
-            newReg = Math.max(0, currentReg - 1)
-          }
-
-          const newSpots = Math.max(0, totalReq - newReg)
           return {
             ...prevEv,
             alreadyRegistered: newReg,
@@ -552,9 +616,10 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
           }
         })
 
+        // 4. Toast & notifications (run synchronously after state is queued)
         if (status === 'accepted') {
           setActionFeedbackToast({
-            message: `✔ ${targetApp?.name || 'Volunteer'} approved! Spot reserved & notification sent to volunteer dashboard.`,
+            message: `✔ ${targetApp.name || 'Volunteer'} approved! Spot reserved & notification sent to volunteer dashboard.`,
             type: 'approve',
           })
           setTimeout(() => setActionFeedbackToast(null), 4000)
@@ -564,13 +629,15 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
             type: 'approval',
             eventId: ev.id,
             eventTitle: ev.title,
-            applicantName: targetApp?.name,
+            applicantName: targetApp.name,
+            targetUserId: targetApp.volunteerId,
+            targetEmail: targetApp.email,
             title: '🎉 Application Approved!',
             message: `Congratulations! ${ev.organization} has approved your application for "${ev.title}". Contact In-Charge ${ev.managerName || 'Coordinator'} (${ev.managerPhone || 'on dashboard'}).`,
           })
         } else {
           setActionFeedbackToast({
-            message: `✖ ${targetApp?.name || 'Volunteer'} application declined. Spot updated & notification sent.`,
+            message: `✖ ${targetApp.name || 'Volunteer'} application declined. Spot updated & notification sent.`,
             type: 'decline',
           })
           setTimeout(() => setActionFeedbackToast(null), 4000)
@@ -580,7 +647,9 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
             type: 'declined',
             eventId: ev.id,
             eventTitle: ev.title,
-            applicantName: targetApp?.name,
+            applicantName: targetApp.name,
+            targetUserId: targetApp.volunteerId,
+            targetEmail: targetApp.email,
             title: 'Application Status Update',
             message: `Your application for "${ev.title}" was declined by ${ev.organization}. Thank you for your enthusiasm!`,
           })
@@ -590,7 +659,10 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
           applicantId,
           eventId: ev.id,
           status,
-          volunteerId: targetApp?.volunteerId,
+          volunteerId: targetApp.volunteerId,
+          alreadyRegistered: newReg,
+          spotsLeft: newSpots,
+          totalRequired: totalReq,
         }).catch((err) => console.warn('Notice updating applicant in DB:', err))
       }
     }
@@ -834,6 +906,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         id: `app-${Date.now()}`,
         eventId: applyingEvent.id,
         eventTitle: applyingEvent.title,
+        volunteerId: userId || userEmail || undefined,
         name: applicantName,
         email: applicantEmail,
         phone: applicantPhone,
@@ -843,22 +916,30 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         appliedAt: 'Just now',
       }
 
-      setOpportunities((prev) => {
-        const updated = prev.map((o) =>
-          o.id === applyingEvent.id
-            ? { ...o, applied: true }
-            : o
-        )
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-        } catch {}
-        return updated
-      })
+      // Do NOT mutate o.applied = true on the global shared opportunities!
+      // Applied state is user-scoped and derived from matching applications.
 
       setApplicants((prev) => {
         const updated = [newApp, ...prev]
         try {
+          // Write to global key (org reads from here to see all applicants)
           localStorage.setItem(APPLICANTS_STORAGE_KEY, JSON.stringify(updated))
+
+          // Also write to user-scoped key(s)
+          const keysToSave = new Set<string>()
+          if (userId) keysToSave.add(`togethernow_event_applicants_v1_${userId}`)
+          if (userEmail) keysToSave.add(`togethernow_event_applicants_v1_${userEmail}`)
+          if (applicantEmail) keysToSave.add(`togethernow_event_applicants_v1_${applicantEmail}`)
+
+          keysToSave.forEach((userAppsKey) => {
+            try {
+              const existingUserApps = localStorage.getItem(userAppsKey)
+              const userApps: Applicant[] = existingUserApps ? JSON.parse(existingUserApps) : []
+              if (!userApps.find((a) => a.id === newApp.id)) {
+                localStorage.setItem(userAppsKey, JSON.stringify([newApp, ...userApps]))
+              }
+            } catch {}
+          })
         } catch {}
         return updated
       })
@@ -868,6 +949,8 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         type: 'application',
         eventId: applyingEvent.id,
         eventTitle: applyingEvent.title,
+        targetUserId: userId,
+        targetEmail: applicantEmail || userEmail,
         title: 'Application Submitted 📨',
         message: `Your request to join "${applyingEvent.title}" has been sent to ${applyingEvent.organization} and is pending review.`,
       })
@@ -916,7 +999,9 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       const alreadyReg = Math.max(0, Number(newAlreadyRegistered) || 0)
       const computedSpotsLeft = Math.max(0, totalReq - alreadyReg)
 
-      const orgName = organizationName?.trim() || 'Organization'
+      const orgName = (organizationName?.trim() && organizationName.trim() !== 'Organization')
+        ? organizationName.trim()
+        : 'Community Organization'
       const managerName = newManagerName.trim() || orgName || 'Drive Coordinator'
       const managerPhone = newManagerPhone.trim() || '+91 98201 44521'
       const location = newIsRemote ? 'Remote' : (newLocation.trim() || newAddress.trim() || 'Marine Drive, Mumbai')
@@ -1176,7 +1261,9 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
             {filteredOpportunities.map((op) => {
               const eventApps = applicants.filter((a) => a.eventId === op.id)
               const eventPending = eventApps.filter((a) => a.status === 'pending').length
-              const volunteerApp = applicants.find((a) => a.eventId === op.id)
+              const volunteerApp = userRole === 'volunteer'
+                ? applicants.find((a) => a.eventId === op.id && isCurrentUserApplicant(a))
+                : undefined
 
               return (
                 <div
@@ -1330,14 +1417,14 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                       <div className="pt-2 border-t border-gray-200/70 dark:border-gray-700/60 flex items-center justify-between text-[11px]">
                         <span className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 font-bold truncate">
                           <UserCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                          <span className="truncate">In-Charge: {op.managerName || op.organization || 'Drive Coordinator'}</span>
+                          <span className="truncate">In-Charge: {(op.managerName && op.managerName !== op.organization) ? op.managerName : 'Event Coordinator'}</span>
                         </span>
                         {op.managerPhone ? (
                           <a
                             href={`tel:${op.managerPhone}`}
                             onClick={(e) => e.stopPropagation()}
                             className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-600 hover:text-white transition-all shrink-0 text-decoration-none shadow-2xs"
-                            title={`Call In-Charge (${op.managerName || op.organization})`}
+                            title={`Call In-Charge (${ (op.managerName && op.managerName !== op.organization) ? op.managerName : 'Event Coordinator'})`}
                           >
                             <Phone className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                             <span>{op.managerPhone}</span>
@@ -1479,7 +1566,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                         <XCircle className="w-4 h-4 text-rose-500" />
                         <span>Application Declined</span>
                       </div>
-                    ) : op.applied || volunteerApp ? (
+                    ) : volunteerApp?.status === 'pending' ? (
                       <div className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-bold text-xs border border-amber-200 dark:border-amber-900/40">
                         <Clock3 className="w-4 h-4 text-amber-600" />
                         <span>Application Under Review ⏳</span>
@@ -1636,7 +1723,9 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                         Person in Charge / Event Manager
                       </span>
                       <h5 className="text-sm font-extrabold text-gray-900 dark:text-white m-0">
-                        {viewingEventModal.managerName || viewingEventModal.organization}
+                        {(viewingEventModal.managerName && viewingEventModal.managerName !== viewingEventModal.organization)
+                          ? viewingEventModal.managerName
+                          : 'Event Coordinator'}
                       </h5>
                     </div>
                   </div>
@@ -1782,20 +1871,48 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                   >
                     Close
                   </button>
-                  {!viewingEventModal.isCancelled && !viewingEventModal.applied && viewingEventModal.spotsLeft > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const ev = viewingEventModal
-                        setViewingEventModal(null)
-                        handleOpenApplyModal(ev)
-                      }}
-                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md border-none cursor-pointer flex items-center gap-1.5"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Apply for this Drive</span>
-                    </button>
-                  )}
+                  {(() => {
+                    const modalApp = viewingEventModal && userRole === 'volunteer'
+                      ? applicants.find((a) => a.eventId === viewingEventModal.id && isCurrentUserApplicant(a))
+                      : null
+
+                    if (modalApp) {
+                      return (
+                        <span className={`px-4 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 ${
+                          modalApp.status === 'accepted'
+                            ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                            : modalApp.status === 'declined'
+                            ? 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300'
+                            : 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
+                        }`}>
+                          {modalApp.status === 'accepted'
+                            ? '✓ Spot Confirmed'
+                            : modalApp.status === 'declined'
+                            ? 'Application Declined'
+                            : '⏳ Application Under Review'}
+                        </span>
+                      )
+                    }
+
+                    if (!viewingEventModal.isCancelled && viewingEventModal.spotsLeft > 0) {
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const ev = viewingEventModal
+                            setViewingEventModal(null)
+                            handleOpenApplyModal(ev)
+                          }}
+                          className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md border-none cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Apply for this Drive</span>
+                        </button>
+                      )
+                    }
+
+                    return null
+                  })()}
                 </div>
               </div>
 
@@ -2078,12 +2195,13 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                         <div className="flex sm:flex-col md:flex-row items-center gap-2 pt-2 md:pt-0 shrink-0 border-t md:border-t-0 border-gray-100 dark:border-gray-800">
                           <button
                             type="button"
+                            disabled={app.status === 'accepted'}
                             title="Approve Candidate (Tick)"
                             onClick={() => handleApplicantStatus(app.id, 'accepted', managingEvent)}
-                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 shadow-xs ${
+                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border-none flex items-center justify-center gap-1.5 shadow-xs ${
                               app.status === 'accepted'
-                                ? 'bg-emerald-600 text-white ring-2 ring-emerald-500/50 shadow-md scale-105'
-                                : 'bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-600 hover:text-white border border-emerald-200 dark:border-emerald-800'
+                                ? 'bg-emerald-600 text-white ring-2 ring-emerald-500/50 shadow-md scale-105 opacity-75 cursor-not-allowed'
+                                : 'bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-600 hover:text-white border border-emerald-200 dark:border-emerald-800 cursor-pointer'
                             }`}
                           >
                             <Check className="w-4 h-4 stroke-[3]" />
@@ -2092,12 +2210,13 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
 
                           <button
                             type="button"
+                            disabled={app.status === 'declined'}
                             title="Decline Candidate (Cross)"
                             onClick={() => handleApplicantStatus(app.id, 'declined', managingEvent)}
-                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 shadow-xs ${
+                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border-none flex items-center justify-center gap-1.5 shadow-xs ${
                               app.status === 'declined'
-                                ? 'bg-rose-600 text-white ring-2 ring-rose-500/50 shadow-md scale-105'
-                                : 'bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 hover:bg-rose-600 hover:text-white border border-rose-200 dark:border-rose-800'
+                                ? 'bg-rose-600 text-white ring-2 ring-rose-500/50 shadow-md scale-105 opacity-75 cursor-not-allowed'
+                                : 'bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 hover:bg-rose-600 hover:text-white border border-rose-200 dark:border-rose-800 cursor-pointer'
                             }`}
                           >
                             <X className="w-4 h-4 stroke-[3]" />

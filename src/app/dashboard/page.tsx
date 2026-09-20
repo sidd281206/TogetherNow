@@ -111,6 +111,17 @@ export default async function DashboardPage() {
     }
   }
 
+  // For organizations, always fetch the canonical org name from the profiles table
+  let organizationName: string | undefined
+  if (role === 'organization') {
+    const { data: profileRow } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('id', user.id)
+      .maybeSingle()
+    organizationName = profileRow?.full_name || user.user_metadata?.full_name || undefined
+  }
+
   const profileStatus = {
     isNewUser,
     completionPercentage,
@@ -119,5 +130,5 @@ export default async function DashboardPage() {
     missingFields,
   }
 
-  return <DashboardClient user={user} profileStatus={profileStatus} />
+  return <DashboardClient user={user} profileStatus={profileStatus} organizationName={organizationName} />
 }

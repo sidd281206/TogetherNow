@@ -79,7 +79,15 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
     .eq('id', user.id)
     .maybeSingle()
 
-  const orgName = userProfile?.full_name || user.user_metadata?.full_name || 'Organization'
+  // Resolve the actual org name — prefer DB profile over user_metadata, avoid generic fallback
+  const orgName = (userProfile?.full_name && userProfile.full_name !== 'Organization'
+    ? userProfile.full_name
+    : null) ||
+    (user.user_metadata?.full_name && user.user_metadata.full_name !== 'Organization'
+      ? user.user_metadata.full_name
+      : null) ||
+    user.email?.split('@')[0] ||
+    'Community Organization'
   const orgStatus = orgProfile?.status || 'approved'
   const isVerified = orgStatus === 'approved'
 
@@ -197,9 +205,10 @@ export async function fetchOpportunitiesAction(): Promise<DbOpportunityOutput[]>
       return []
     }
 
-    // Fetch organization verification statuses
+    // Fetch organization verification statuses AND their real names from profiles
     const orgIds = Array.from(new Set(dbOps.map((op) => op.organization_id).filter(Boolean)))
     const orgStatusMap = new Map<string, string>()
+    const orgNameMap = new Map<string, string>()
 
     if (orgIds.length > 0) {
       const { data: orgs } = await adminClient
@@ -210,25 +219,76 @@ export async function fetchOpportunitiesAction(): Promise<DbOpportunityOutput[]>
       if (orgs) {
         orgs.forEach((o) => orgStatusMap.set(o.id, o.status))
       }
+
+      // Fetch actual org names from profiles (full_name is the org name for org accounts)
+      const { data: orgProfiles } = await adminClient
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', orgIds)
+
+      if (orgProfiles) {
+        orgProfiles.forEach((p) => {
+          if (p.full_name) orgNameMap.set(p.id, p.full_name)
+        })
+      }
+    }
+
+    // Fetch applications counts (accepted) per opportunity from Supabase
+    const acceptedCountByOpId = new Map<string, number>()
+    try {
+      const { data: allApplications } = await adminClient
+        .from('applications')
+        .select('opportunity_id, status')
+
+      if (allApplications) {
+        allApplications.forEach((app) => {
+          if (app.status === 'accepted' || app.status === 'approved') {
+            acceptedCountByOpId.set(
+              app.opportunity_id,
+              (acceptedCountByOpId.get(app.opportunity_id) || 0) + 1
+            )
+          }
+        })
+      }
+    } catch (appErr) {
+      console.warn('Notice reading applications for seat count:', appErr)
     }
 
     return dbOps.map((op) => {
       const status = (op.organization_id ? orgStatusMap.get(op.organization_id) : 'approved') || 'approved'
-        const totalRequired = op.total_required ?? op.total_spots ?? op.spots_left ?? 10
-        const alreadyRegistered = op.already_registered ?? 0
-        const computedSpotsLeft = Math.max(0, totalRequired - alreadyRegistered)
+      const alreadyRegistered = acceptedCountByOpId.get(op.id) || 0
+      const storedSpotsLeft = typeof op.spots_left === 'number' ? op.spots_left : 10
+      const totalRequired = Math.max(10, alreadyRegistered + storedSpotsLeft)
+      const computedSpotsLeft = Math.max(0, storedSpotsLeft)
+
+      // Prefer the real org name from profiles; fall back to stored organization_name
+      // Only use the stored value if it isn't the generic 'Organization' default
+      const storedOrgName = op.organization_name
+      const profileOrgName = op.organization_id ? orgNameMap.get(op.organization_id) : undefined
+      const resolvedOrgName =
+        profileOrgName ||
+        (storedOrgName && storedOrgName !== 'Organization' ? storedOrgName : undefined) ||
+        'Community Organization'
+
+        // Manager name must stay separate from org name.
+        // Only use the stored value if it's a real custom name, not a generic placeholder.
+        const GENERIC_MANAGER_NAMES = ['Organization', 'Event Coordinator', 'Drive Coordinator', 'Community Organization']
+        const storedManager = op.manager_name?.trim()
+        const resolvedManagerName = (storedManager && !GENERIC_MANAGER_NAMES.includes(storedManager))
+          ? storedManager
+          : 'Event Coordinator'
 
         return {
           id: op.id,
           title: op.title,
-          organization: op.organization_name || 'Organization',
+          organization: resolvedOrgName,
           organizationId: op.organization_id || '',
           isVerifiedOrg: status !== 'rejected',
           orgStatus: status as any,
           category: (op.category || 'Community') as any,
           location: op.location || 'Local Community Center',
           address: op.address || op.location || 'Local Community Center',
-          managerName: op.manager_name || op.organization_name || 'Event Coordinator',
+          managerName: resolvedManagerName,
           managerPhone: op.manager_phone || '',
           isRemote: Boolean(op.is_remote),
           date: op.date || 'Upcoming',
@@ -353,26 +413,98 @@ export async function submitVolunteerApplicationAction(payload: {
   }
 }
 
-export async function updateApplicantStatusAction(payload: {
-  applicantId: string
+export async function updateOpportunitySpotsAction(payload: {
   eventId: string
-  status: 'accepted' | 'declined'
-  volunteerId?: string
+  alreadyRegistered: number
+  spotsLeft: number
+  totalRequired?: number
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     const adminClient = createAdminClient(supabaseUrl, serviceKey)
 
-    // Attempt to update Supabase applications table if present
-    if (payload.volunteerId && payload.eventId) {
-      try {
+    // Supabase opportunities table schema ONLY contains spots_left column
+    const { error: updateErr } = await adminClient
+      .from('opportunities')
+      .update({ spots_left: Math.max(0, payload.spotsLeft) })
+      .eq('id', payload.eventId)
+
+    if (updateErr) {
+      console.warn('Notice updating opportunity spots in DB:', updateErr.message)
+    }
+
+    revalidatePath('/dashboard')
+    return { success: true }
+  } catch (err: any) {
+    console.error('Error updating opportunity spots:', err)
+    return { success: false, error: err?.message }
+  }
+}
+
+export async function updateApplicantStatusAction(payload: {
+  applicantId: string
+  eventId: string
+  status: 'accepted' | 'declined'
+  volunteerId?: string
+  alreadyRegistered?: number
+  spotsLeft?: number
+  totalRequired?: number
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    const adminClient = createAdminClient(supabaseUrl, serviceKey)
+
+    // Postgres application_status enum only allows: 'pending', 'accepted', 'rejected'
+    const targetDbStatus = payload.status === 'accepted' ? 'accepted' : 'rejected'
+
+    // 1. Update Supabase applications table
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.applicantId)
+      if (isUuid) {
         await adminClient
           .from('applications')
-          .update({ status: payload.status === 'accepted' ? 'accepted' : 'rejected' })
+          .update({ status: targetDbStatus })
+          .eq('id', payload.applicantId)
+      }
+      if (payload.volunteerId && payload.eventId) {
+        await adminClient
+          .from('applications')
+          .update({ status: targetDbStatus })
           .match({ opportunity_id: payload.eventId, volunteer_id: payload.volunteerId })
-      } catch (err) {
-        console.warn('Notice updating Supabase application status:', err)
+      }
+    } catch (err) {
+      console.warn('Notice updating Supabase application status:', err)
+    }
+
+    // 2. Globally update seat availability (spots_left) in opportunities table
+    if (payload.eventId) {
+      try {
+        let newSpots = payload.spotsLeft
+
+        if (newSpots === undefined) {
+          const { data: currentOp } = await adminClient
+            .from('opportunities')
+            .select('spots_left')
+            .eq('id', payload.eventId)
+            .maybeSingle()
+
+          const curSpots = typeof currentOp?.spots_left === 'number' ? currentOp.spots_left : 10
+          newSpots = payload.status === 'accepted' ? Math.max(0, curSpots - 1) : curSpots + 1
+        }
+
+        // opportunities table only has spots_left column (no already_registered)
+        const { error: opErr } = await adminClient
+          .from('opportunities')
+          .update({ spots_left: Math.max(0, newSpots) })
+          .eq('id', payload.eventId)
+
+        if (opErr) {
+          console.warn('Notice updating opportunity spots in DB:', opErr.message)
+        }
+      } catch (dbErr) {
+        console.warn('Notice updating opportunity seats in DB:', dbErr)
       }
     }
 
@@ -381,6 +513,110 @@ export async function updateApplicantStatusAction(payload: {
   } catch (err: any) {
     console.error('Error updating applicant status:', err)
     return { success: false, error: err?.message }
+  }
+}
+
+export async function fetchApplicantsAction(): Promise<DbApplicantRecord[]> {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    const adminClient = createAdminClient(supabaseUrl, serviceKey)
+
+    const { data: dbApps, error: appsErr } = await adminClient
+      .from('applications')
+      .select('*')
+      .order('applied_at', { ascending: false })
+
+    if (appsErr || !dbApps) {
+      return []
+    }
+
+    // Fetch user details for applicants
+    const userMap = new Map<string, { name: string; email: string; phone: string }>()
+    try {
+      const { data: usersData } = await adminClient.auth.admin.listUsers()
+      if (usersData?.users) {
+        usersData.users.forEach((u) => {
+          userMap.set(u.id, {
+            name: (u.user_metadata?.full_name || u.email?.split('@')[0] || 'Volunteer').trim(),
+            email: u.email || '',
+            phone: u.phone || u.user_metadata?.phone || '',
+          })
+        })
+      }
+    } catch (uErr) {
+      console.warn('Notice reading users for applicants:', uErr)
+    }
+
+    // Fetch volunteer profiles for skills
+    const skillsMap = new Map<string, string[]>()
+    try {
+      const { data: volProfiles } = await adminClient
+        .from('volunteer_profiles')
+        .select('id, skills')
+      if (volProfiles) {
+        volProfiles.forEach((vp) => {
+          if (Array.isArray(vp.skills) && vp.skills.length > 0) {
+            skillsMap.set(vp.id, vp.skills)
+          }
+        })
+      }
+    } catch (vErr) {
+      console.warn('Notice reading volunteer profiles for skills:', vErr)
+    }
+
+    // Fetch opportunity titles
+    const opTitleMap = new Map<string, string>()
+    try {
+      const { data: ops } = await adminClient
+        .from('opportunities')
+        .select('id, title')
+      if (ops) {
+        ops.forEach((o) => opTitleMap.set(o.id, o.title))
+      }
+    } catch (oErr) {
+      console.warn('Notice reading opportunities for applicants:', oErr)
+    }
+
+    return dbApps.map((a) => {
+      const uInfo = userMap.get(a.volunteer_id)
+      const skills = skillsMap.get(a.volunteer_id) || ['Community Support', 'Volunteering']
+      const status: 'pending' | 'accepted' | 'declined' =
+        a.status === 'accepted' ? 'accepted' : a.status === 'rejected' ? 'declined' : 'pending'
+
+      return {
+        id: a.id,
+        eventId: a.opportunity_id,
+        eventTitle: opTitleMap.get(a.opportunity_id) || 'Volunteer Drive',
+        volunteerId: a.volunteer_id,
+        name: uInfo?.name || 'Volunteer',
+        email: uInfo?.email || '',
+        phone: uInfo?.phone || '',
+        skills,
+        note: '',
+        status,
+        appliedAt: a.applied_at
+          ? new Date(a.applied_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          : 'Recently',
+      }
+    })
+  } catch (err) {
+    console.error('Error fetching applicants from DB:', err)
+    return []
+  }
+}
+
+export async function fetchUserApplicationsAction(userId?: string, email?: string): Promise<DbApplicantRecord[]> {
+  try {
+    const all = await fetchApplicantsAction()
+    return all.filter((a) => {
+      if (userId && a.volunteerId && a.volunteerId === userId) return true
+      if (email && a.email && a.email.trim().toLowerCase() === email.trim().toLowerCase()) return true
+      return false
+    })
+  } catch (err) {
+    console.error('Error fetching user applications:', err)
+    return []
   }
 }
 

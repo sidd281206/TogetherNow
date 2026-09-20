@@ -35,7 +35,15 @@ import {
   Star
 } from 'lucide-react'
 import ResubmitApplicationButton from '@/components/ui/ResubmitApplicationButton'
-import { updateApplicantStatusAction, cancelOpportunityAction, updateOpportunityContactAction, markOpportunityCompletedAction } from '@/app/actions/opportunities'
+import { 
+  updateApplicantStatusAction, 
+  cancelOpportunityAction, 
+  updateOpportunityContactAction, 
+  markOpportunityCompletedAction,
+  fetchOpportunitiesAction,
+  fetchApplicantsAction,
+} from '@/app/actions/opportunities'
+import { createClient } from '@/lib/supabase/client'
 import { pushNotification } from '@/lib/notifications'
 import OrganizationAboutModal from '@/components/ui/OrganizationAboutModal'
 import OrganizationAboutEditorModal from '@/components/ui/OrganizationAboutEditorModal'
@@ -284,15 +292,125 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     }
   }
 
+  const syncWithDb = async () => {
+    try {
+      // 1. Fetch live DB opportunities with accurate seat availability
+      const dbOps = await fetchOpportunitiesAction()
+      if (dbOps && dbOps.length > 0) {
+        setOpportunities((prev) => {
+          const map = new Map<string, Opportunity>()
+          prev.forEach((op) => map.set(op.id, op))
+          dbOps.forEach((dbOp) => {
+            const existing = map.get(dbOp.id)
+            if (existing) {
+              map.set(dbOp.id, {
+                ...existing,
+                ...dbOp,
+                date: (dbOp.date && dbOp.date !== 'Upcoming') ? dbOp.date : (existing.date || dbOp.date || 'Upcoming'),
+                time: (dbOp.time && dbOp.time !== 'Flexible' && dbOp.time !== 'To be scheduled') ? dbOp.time : (existing.time || dbOp.time || '09:00 AM - 01:00 PM'),
+                address: (dbOp.address && dbOp.address !== 'Local Community Center' && dbOp.address !== 'Remote') ? dbOp.address : (existing.address || dbOp.address || existing.location),
+                location: dbOp.location || existing.location || 'Local Community Center',
+                managerName: (dbOp.managerName && dbOp.managerName !== 'Event Coordinator' && dbOp.managerName !== 'Coordinator') ? dbOp.managerName : (existing.managerName || dbOp.managerName),
+                managerPhone: dbOp.managerPhone ? dbOp.managerPhone : (existing.managerPhone || ''),
+              })
+            } else {
+              map.set(dbOp.id, dbOp as Opportunity)
+            }
+          })
+          const merged = Array.from(map.values())
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
+          } catch {}
+          return merged
+        })
+      }
+
+      // 2. Fetch live DB applicants
+      const dbApplicants = await fetchApplicantsAction()
+      if (dbApplicants && dbApplicants.length > 0) {
+        setApplicants((prev) => {
+          const map = new Map<string, Applicant>()
+          prev.forEach((a) => map.set(a.id, a))
+          dbApplicants.forEach((dbA) => {
+            map.set(dbA.id, dbA)
+          })
+          const merged = Array.from(map.values())
+          try {
+            localStorage.setItem(APPLICANTS_STORAGE_KEY, JSON.stringify(merged))
+          } catch {}
+          return merged
+        })
+      }
+    } catch (err) {
+      console.warn('Notice syncing organization dashboard with DB:', err)
+    }
+  }
+
+  // Keep inspectingDrive synchronized if opportunities update in background
+  useEffect(() => {
+    if (inspectingDrive) {
+      const live = opportunities.find((o) => o.id === inspectingDrive.id)
+      if (live && (live.spotsLeft !== inspectingDrive.spotsLeft || live.alreadyRegistered !== inspectingDrive.alreadyRegistered)) {
+        setInspectingDrive((prev) =>
+          prev
+            ? {
+                ...prev,
+                spotsLeft: live.spotsLeft,
+                alreadyRegistered: live.alreadyRegistered,
+                totalRequired: live.totalRequired,
+              }
+            : null
+        )
+      }
+    }
+  }, [opportunities, inspectingDrive])
+
   useEffect(() => {
     loadData()
-    window.addEventListener('togethernow_opportunities_updated', loadData)
-    window.addEventListener('togethernow_new_notification', loadData)
-    window.addEventListener('storage', loadData)
+    syncWithDb()
+
+    const handleUpdate = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setOpportunities(e.detail)
+      } else {
+        loadData()
+        syncWithDb()
+      }
+    }
+
+    const handleFocusSync = () => {
+      loadData()
+      syncWithDb()
+    }
+
+    window.addEventListener('togethernow_opportunities_updated', handleUpdate)
+    window.addEventListener('togethernow_new_notification', handleFocusSync)
+    window.addEventListener('storage', handleFocusSync)
+    window.addEventListener('focus', handleFocusSync)
+
+    // Supabase realtime channel to receive live updates when seats or applicants change globally
+    const supabase = createClient()
+    const channel = supabase
+      .channel('org-dashboard-global-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'opportunities' }, () => {
+        syncWithDb()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
+        syncWithDb()
+      })
+      .subscribe()
+
+    const pollTimer = setInterval(() => {
+      syncWithDb()
+    }, 5000)
+
     return () => {
-      window.removeEventListener('togethernow_opportunities_updated', loadData)
-      window.removeEventListener('togethernow_new_notification', loadData)
-      window.removeEventListener('storage', loadData)
+      window.removeEventListener('togethernow_opportunities_updated', handleUpdate)
+      window.removeEventListener('togethernow_new_notification', handleFocusSync)
+      window.removeEventListener('storage', handleFocusSync)
+      window.removeEventListener('focus', handleFocusSync)
+      supabase.removeChannel(channel)
+      clearInterval(pollTimer)
     }
   }, [])
 
@@ -360,77 +478,115 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     if (!inspectingDrive) return
     const ev = inspectingDrive
 
-    let updatedCand: Applicant | undefined
-    let prevStatus: string | undefined
+    // Read current state synchronously BEFORE any setState calls
+    const currentCandidate = applicants.find((a) => a.id === candidateId)
 
+    // Idempotency guard: do nothing if already at target status
+    if (currentCandidate?.status === status) return
+
+    // Capture previous status and build updated candidate synchronously
+    const prevStatus = currentCandidate?.status
+    const updatedCand: Applicant = { ...currentCandidate!, status }
+
+    // Compute spot delta once from synchronously-read prevStatus
+    const shouldIncrement = status === 'accepted' && prevStatus !== 'accepted'
+    const shouldDecrement = status === 'declined' && prevStatus === 'accepted'
+
+    // 1. Update applicants (pure updater)
     setApplicants((prev) => {
-      const updated = prev.map((a) => {
-        if (a.id === candidateId) {
-          prevStatus = a.status
-          updatedCand = { ...a, status }
-          return updatedCand
-        }
-        return a
-      })
+      const updated = prev.map((a) => (a.id === candidateId ? { ...a, status } : a))
       try {
         localStorage.setItem(APPLICANTS_STORAGE_KEY, JSON.stringify(updated))
+
+        // Also update volunteer's user-scoped key(s) so their dashboard immediately reflects the change
+        const vId = updatedCand.volunteerId
+        const vEmail = updatedCand.email
+        const keysToUpdate = new Set<string>()
+        if (vId) keysToUpdate.add(`togethernow_event_applicants_v1_${vId}`)
+        if (vEmail) keysToUpdate.add(`togethernow_event_applicants_v1_${vEmail}`)
+
+        keysToUpdate.forEach((key) => {
+          try {
+            const raw = localStorage.getItem(key)
+            if (raw) {
+              const apps: Applicant[] = JSON.parse(raw)
+              const synced = apps.map((a) => (a.id === candidateId ? { ...a, status } : a))
+              localStorage.setItem(key, JSON.stringify(synced))
+            }
+          } catch {}
+        })
       } catch {}
       return updated
     })
 
+    // 2. Update opportunities spots (pure updater — dispatch deferred)
     setOpportunities((prev) => {
       const updated = prev.map((o) => {
-        if (o.id === ev.id) {
-          const currentReg = o.alreadyRegistered ?? 0
-          const totalReq = o.totalRequired ?? (o.spotsLeft + currentReg)
-          let newReg = currentReg
-          if (status === 'accepted' && prevStatus !== 'accepted') {
-            newReg = currentReg + 1
-          } else if (status === 'declined' && prevStatus === 'accepted') {
-            newReg = Math.max(0, currentReg - 1)
-          }
-          const newSpots = Math.max(0, totalReq - newReg)
-          return { ...o, alreadyRegistered: newReg, spotsLeft: newSpots }
-        }
-        return o
+        if (o.id !== ev.id) return o
+        const currentReg = o.alreadyRegistered ?? 0
+        const totalReq = o.totalRequired ?? (o.spotsLeft + currentReg)
+        const newReg = shouldIncrement
+          ? currentReg + 1
+          : shouldDecrement
+          ? Math.max(0, currentReg - 1)
+          : currentReg
+        return { ...o, alreadyRegistered: newReg, spotsLeft: Math.max(0, totalReq - newReg) }
       })
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-        window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
+        // Defer dispatch so it doesn't fire inside a state updater (prevents re-entrant state reads)
+        queueMicrotask(() => {
+          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
+        })
       } catch {}
       return updated
     })
 
+    // 3. Update inspecting drive spots (pure updater)
     setInspectingDrive((prev) => {
       if (!prev) return prev
       const currentReg = prev.alreadyRegistered ?? 0
       const totalReq = prev.totalRequired ?? (prev.spotsLeft + currentReg)
-      let newReg = currentReg
-      if (status === 'accepted' && prevStatus !== 'accepted') {
-        newReg = currentReg + 1
-      } else if (status === 'declined' && prevStatus === 'accepted') {
-        newReg = Math.max(0, currentReg - 1)
-      }
+      const newReg = shouldIncrement
+        ? currentReg + 1
+        : shouldDecrement
+        ? Math.max(0, currentReg - 1)
+        : currentReg
       return { ...prev, alreadyRegistered: newReg, spotsLeft: Math.max(0, totalReq - newReg) }
     })
 
+    // 4. Notification (runs synchronously after state is queued)
     if (status === 'accepted') {
       pushNotification({
         targetRole: 'volunteer',
         type: 'approval',
         eventId: ev.id,
         eventTitle: ev.title,
-        applicantName: updatedCand?.name,
+        applicantName: updatedCand.name,
+        targetUserId: updatedCand.volunteerId,
+        targetEmail: updatedCand.email,
         title: '🎉 Application Approved!',
         message: `Congratulations! ${ev.organization} approved your spot for "${ev.title}". In-Charge: ${ev.managerName || 'Coordinator'} (${ev.managerPhone || 'on dashboard'}).`,
       })
     }
 
+    const currentReg = ev.alreadyRegistered ?? 0
+    const totalReq = ev.totalRequired ?? (ev.spotsLeft + currentReg)
+    const newReg = shouldIncrement
+      ? currentReg + 1
+      : shouldDecrement
+      ? Math.max(0, currentReg - 1)
+      : currentReg
+    const newSpots = Math.max(0, totalReq - newReg)
+
     updateApplicantStatusAction({
       applicantId: candidateId,
       eventId: ev.id,
       status,
-      volunteerId: updatedCand?.volunteerId,
+      volunteerId: updatedCand.volunteerId,
+      alreadyRegistered: newReg,
+      spotsLeft: newSpots,
+      totalRequired: totalReq,
     }).catch((err) => console.warn('Notice saving applicant status:', err))
   }
 
@@ -1212,7 +1368,9 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                   </div>
                 </div>
                 <h5 className="text-sm font-extrabold text-gray-900 dark:text-white m-0">
-                  {inspectingDrive.managerName || inspectingDrive.organization}
+                  {(inspectingDrive.managerName && inspectingDrive.managerName !== inspectingDrive.organization)
+                    ? inspectingDrive.managerName
+                    : 'Event Coordinator'}
                 </h5>
                 <div className="text-xs text-gray-600 dark:text-gray-300">
                   Phone: <strong>{inspectingDrive.managerPhone || 'N/A'}</strong>
@@ -1380,28 +1538,30 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
+                          disabled={cand.status === 'accepted'}
                           onClick={() => handleCandidateStatus(cand.id, 'accepted')}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border-none cursor-pointer flex items-center gap-1 ${
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border-none flex items-center gap-1 ${
                             cand.status === 'accepted'
-                              ? 'bg-emerald-600 text-white shadow-md'
-                              : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white dark:bg-emerald-950 dark:text-emerald-300'
+                              ? 'bg-emerald-600 text-white shadow-md opacity-75 cursor-not-allowed'
+                              : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white dark:bg-emerald-950 dark:text-emerald-300 cursor-pointer'
                           }`}
                         >
                           <Check className="w-3.5 h-3.5 stroke-[3]" />
-                          <span>Approve (✔)</span>
+                          <span>{cand.status === 'accepted' ? 'Approved ✔' : 'Approve'}</span>
                         </button>
 
                         <button
                           type="button"
+                          disabled={cand.status === 'declined'}
                           onClick={() => handleCandidateStatus(cand.id, 'declined')}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border-none cursor-pointer flex items-center gap-1 ${
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border-none flex items-center gap-1 ${
                             cand.status === 'declined'
-                              ? 'bg-rose-600 text-white shadow-md'
-                              : 'bg-rose-50 text-rose-700 hover:bg-rose-600 hover:text-white dark:bg-rose-950 dark:text-rose-300'
+                              ? 'bg-rose-600 text-white shadow-md opacity-75 cursor-not-allowed'
+                              : 'bg-rose-50 text-rose-700 hover:bg-rose-600 hover:text-white dark:bg-rose-950 dark:text-rose-300 cursor-pointer'
                           }`}
                         >
                           <X className="w-3.5 h-3.5 stroke-[3]" />
-                          <span>Decline (✖)</span>
+                          <span>{cand.status === 'declined' ? 'Declined ✖' : 'Decline'}</span>
                         </button>
                       </div>
                     </div>

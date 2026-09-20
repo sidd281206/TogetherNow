@@ -39,14 +39,19 @@ interface DashboardClientProps {
     missingFields: string[]
     orgStatus?: string
   }
+  organizationName?: string
 }
 
-export default function DashboardClient({ user, profileStatus }: DashboardClientProps) {
+export default function DashboardClient({ user, profileStatus, organizationName: orgNameFromDb }: DashboardClientProps) {
   const opportunitiesRef = useRef<OpportunitiesFeedRef | null>(null)
 
   const fullName = user.user_metadata?.full_name ?? user.email ?? 'Friend'
   const firstName = fullName.split(' ')[0]
   const role = profileStatus.role ?? 'volunteer'
+
+  // For organizations: prefer the name fetched from DB (profiles.full_name)
+  // over user_metadata to ensure the correct org name is always used
+  const organizationName = orgNameFromDb || fullName
 
   const handleSearchClick = () => {
     opportunitiesRef.current?.focusSearch()
@@ -145,11 +150,12 @@ export default function DashboardClient({ user, profileStatus }: DashboardClient
             userId={user.id}
             userEmail={user.email || ''}
             orgStatus={profileStatus.orgStatus}
-            organizationName={fullName}
+            organizationName={organizationName}
           />
         ) : (
           <VolunteerDashboard
             opportunitiesRef={opportunitiesRef}
+            userId={user.id}
             userEmail={user.email || ''}
             userName={fullName}
             profileStatus={profileStatus}

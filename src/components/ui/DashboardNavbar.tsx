@@ -88,7 +88,7 @@ export default function DashboardNavbar({
   // Load and listen for notifications
   useEffect(() => {
     const refreshNotifications = () => {
-      setNotifications(getStoredNotifications(role))
+      setNotifications(getStoredNotifications(role, undefined, { userId: user.id, userEmail: user.email }))
     }
     refreshNotifications()
 
@@ -98,7 +98,7 @@ export default function DashboardNavbar({
       window.removeEventListener('togethernow_new_notification', refreshNotifications)
       window.removeEventListener('storage', refreshNotifications)
     }
-  }, [role])
+  }, [role, user.id, user.email])
 
   const unreadCount = notifications.filter((n) => n.unread).length
 
