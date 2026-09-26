@@ -1,13 +1,14 @@
 'use client'
 
-import React, { useRef } from 'react'
+import React, { useRef, useState } from 'react'
 import DashboardNavbar from '@/components/ui/DashboardNavbar'
 import ProfilePromptBanner from '@/components/ui/ProfilePromptBanner'
 import VolunteerDashboard from '@/components/ui/VolunteerDashboard'
 import OrganizationDashboard from '@/components/ui/OrganizationDashboard'
 import { OpportunitiesFeedRef } from '@/components/ui/OpportunitiesFeed'
-import { Check, CheckCircle2 } from 'lucide-react'
+import { Check, CheckCircle2, User, SlidersHorizontal } from 'lucide-react'
 import ResubmitApplicationButton from '@/components/ui/ResubmitApplicationButton'
+import ProfileCompletionModal from '@/components/ui/ProfileCompletionModal'
 
 const ROLE_LABELS: Record<string, string> = {
   volunteer:    'Volunteer',
@@ -39,11 +40,22 @@ interface DashboardClientProps {
     missingFields: string[]
     orgStatus?: string
   }
+  volunteerPreferences?: {
+    skills: string[]
+    interests: string[]
+    city: string
+  }
   organizationName?: string
 }
 
-export default function DashboardClient({ user, profileStatus, organizationName: orgNameFromDb }: DashboardClientProps) {
+export default function DashboardClient({
+  user,
+  profileStatus,
+  organizationName: orgNameFromDb,
+  volunteerPreferences,
+}: DashboardClientProps) {
   const opportunitiesRef = useRef<OpportunitiesFeedRef | null>(null)
+  const [showProfileModal, setShowProfileModal] = useState(false)
 
   const fullName = user.user_metadata?.full_name ?? user.email ?? 'Friend'
   const firstName = fullName.split(' ')[0]
@@ -62,13 +74,15 @@ export default function DashboardClient({ user, profileStatus, organizationName:
   }
 
   return (
-    <div className="min-h-screen bg-gray-50/60 dark:bg-gray-950 font-sans text-gray-900 dark:text-gray-100 flex flex-col">
+    <div suppressHydrationWarning className="min-h-screen bg-gray-50/60 dark:bg-gray-950 font-sans text-gray-900 dark:text-gray-100 flex flex-col">
       {/* Top Header Navbar */}
       <DashboardNavbar
         user={user}
         profileStatus={profileStatus}
         onSearchClick={handleSearchClick}
         onPostOpportunityClick={handlePostOpportunityClick}
+        onOpenProfileClick={() => setShowProfileModal(true)}
+        volunteerPreferences={volunteerPreferences}
       />
 
       {/* Main Content Area */}
@@ -105,6 +119,19 @@ export default function DashboardClient({ user, profileStatus, organizationName:
               </h1>
             </div>
           </div>
+
+          {/* Quick Profile & Skills Edit button for Volunteers */}
+          {role === 'volunteer' && (
+            <button
+              type="button"
+              onClick={() => setShowProfileModal(true)}
+              className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gray-50 hover:bg-emerald-50 hover:text-emerald-700 dark:bg-gray-800/80 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200 text-xs font-bold transition-all border border-gray-200/80 dark:border-gray-700 shadow-2xs cursor-pointer group"
+              title="Click to change your city, phone number, interests, and skills"
+            >
+              <User className="w-4 h-4 text-emerald-600 group-hover:scale-110 transition-transform" />
+              <span>My Profile & Skills</span>
+            </button>
+          )}
         </div>
 
         {/* Dynamic Profile Prompt Banner (New Users vs Existing Incomplete Users) */}
@@ -159,10 +186,25 @@ export default function DashboardClient({ user, profileStatus, organizationName:
             userEmail={user.email || ''}
             userName={fullName}
             profileStatus={profileStatus}
+            volunteerPreferences={volunteerPreferences}
           />
         )}
 
       </main>
+
+      {/* Global Volunteer Profile & Preferences Modal */}
+      {showProfileModal && role === 'volunteer' && (
+        <ProfileCompletionModal
+          isOpen={showProfileModal}
+          onClose={() => setShowProfileModal(false)}
+          userEmail={user.email}
+          userName={fullName}
+          userRole="volunteer"
+          initialCity={volunteerPreferences?.city}
+          initialSkills={volunteerPreferences?.skills}
+          initialInterests={volunteerPreferences?.interests}
+        />
+      )}
     </div>
   )
 }

@@ -24,6 +24,8 @@ export interface DbOpportunityInput {
   cancelReason?: string
   isCompleted?: boolean
   completedAt?: string
+  isApplicationsClosed?: boolean
+  applicationsClosedAt?: string
 }
 
 export interface DbOpportunityOutput {
@@ -52,6 +54,35 @@ export interface DbOpportunityOutput {
   cancelReason?: string
   isCompleted?: boolean
   completedAt?: string
+  isApplicationsClosed?: boolean
+  applicationsClosedAt?: string
+}
+
+const TN_META_REGEX = /<!--TN_META:([\s\S]*?)-->/
+
+function extractMetadataFromDescription(rawDescription?: string | null): {
+  cleanDescription: string
+  meta: Record<string, any>
+} {
+  if (!rawDescription) return { cleanDescription: '', meta: {} }
+  const match = rawDescription.match(TN_META_REGEX)
+  if (!match) return { cleanDescription: rawDescription, meta: {} }
+  try {
+    const meta = JSON.parse(match[1])
+    const cleanDescription = rawDescription.replace(TN_META_REGEX, '').trim()
+    return { cleanDescription, meta: typeof meta === 'object' && meta ? meta : {} }
+  } catch {
+    return { cleanDescription: rawDescription, meta: {} }
+  }
+}
+
+function injectMetadataIntoDescription(
+  existingDescription: string | null | undefined,
+  metaUpdates: Record<string, any>
+): string {
+  const { cleanDescription, meta } = extractMetadataFromDescription(existingDescription)
+  const mergedMeta = { ...meta, ...metaUpdates }
+  return `${cleanDescription}\n<!--TN_META:${JSON.stringify(mergedMeta)}-->`
 }
 
 export async function createOpportunityAction(input: DbOpportunityInput): Promise<{
@@ -255,6 +286,7 @@ export async function fetchOpportunitiesAction(): Promise<DbOpportunityOutput[]>
     }
 
     return dbOps.map((op) => {
+      const { cleanDescription, meta } = extractMetadataFromDescription(op.description)
       const status = (op.organization_id ? orgStatusMap.get(op.organization_id) : 'approved') || 'approved'
       const alreadyRegistered = acceptedCountByOpId.get(op.id) || 0
       const storedSpotsLeft = typeof op.spots_left === 'number' ? op.spots_left : 10
@@ -276,7 +308,7 @@ export async function fetchOpportunitiesAction(): Promise<DbOpportunityOutput[]>
         const storedManager = op.manager_name?.trim()
         const resolvedManagerName = (storedManager && !GENERIC_MANAGER_NAMES.includes(storedManager))
           ? storedManager
-          : 'Event Coordinator'
+          : (meta.managerName || 'Event Coordinator')
 
         return {
           id: op.id,
@@ -287,9 +319,9 @@ export async function fetchOpportunitiesAction(): Promise<DbOpportunityOutput[]>
           orgStatus: status as any,
           category: (op.category || 'Community') as any,
           location: op.location || 'Local Community Center',
-          address: op.address || op.location || 'Local Community Center',
+          address: op.address || meta.address || op.location || 'Local Community Center',
           managerName: resolvedManagerName,
-          managerPhone: op.manager_phone || '',
+          managerPhone: op.manager_phone || meta.managerPhone || '',
           isRemote: Boolean(op.is_remote),
           date: op.date || 'Upcoming',
           time: op.time || 'Flexible',
@@ -297,13 +329,15 @@ export async function fetchOpportunitiesAction(): Promise<DbOpportunityOutput[]>
           totalRequired: totalRequired,
           alreadyRegistered: alreadyRegistered,
           skillsNeeded: Array.isArray(op.skills_needed) ? op.skills_needed : ['Volunteering'],
-          description: op.description || '',
+          description: cleanDescription,
           createdAt: op.created_at,
-          isCancelled: Boolean(op.is_cancelled || op.isCancelled),
-          cancelledAt: op.cancelled_at || op.cancelledAt,
-          cancelReason: op.cancel_reason || op.cancelReason,
-          isCompleted: Boolean(op.is_completed || op.isCompleted),
-          completedAt: op.completed_at || op.completedAt,
+          isCancelled: Boolean(op.is_cancelled || op.isCancelled || meta.isCancelled),
+          cancelledAt: op.cancelled_at || op.cancelledAt || meta.cancelledAt,
+          cancelReason: op.cancel_reason || op.cancelReason || meta.cancelReason,
+          isCompleted: Boolean(op.is_completed || op.isCompleted || meta.isCompleted),
+          completedAt: op.completed_at || op.completedAt || meta.completedAt,
+          isApplicationsClosed: Boolean(op.is_applications_closed || op.isApplicationsClosed || meta.isApplicationsClosed),
+          applicationsClosedAt: op.applications_closed_at || op.applicationsClosedAt || meta.applicationsClosedAt,
         }
     })
   } catch (err) {
@@ -325,7 +359,24 @@ export async function markOpportunityCompletedAction(payload: {
     const isCompleted = payload.isCompleted !== false
     const completedAt = isCompleted ? (payload.completedAt || new Date().toISOString()) : null
 
-    // Attempt to update database columns or description tag
+    // 1. Fetch current description to inject permanent metadata tag
+    const { data: currentOp } = await adminClient
+      .from('opportunities')
+      .select('description')
+      .eq('id', payload.eventId)
+      .single()
+
+    const updatedDescription = injectMetadataIntoDescription(currentOp?.description, {
+      isCompleted,
+      completedAt,
+    })
+
+    await adminClient
+      .from('opportunities')
+      .update({ description: updatedDescription })
+      .eq('id', payload.eventId)
+
+    // 2. Also try direct column update
     try {
       await adminClient
         .from('opportunities')
@@ -676,6 +727,61 @@ export async function updateOpportunityContactAction(payload: {
     return { success: true }
   } catch (err: any) {
     console.error('Error updating opportunity contact:', err)
+    return { success: false, error: err?.message }
+  }
+}
+
+export async function toggleApplicationsAction(payload: {
+  eventId: string
+  isClosed: boolean
+  applicationsClosedAt?: string
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    const adminClient = createAdminClient(supabaseUrl, serviceKey)
+
+    const closedTime = payload.isClosed ? (payload.applicationsClosedAt || new Date().toISOString()) : null
+
+    // 1. Fetch current description to inject permanent metadata tag
+    const { data: currentOp } = await adminClient
+      .from('opportunities')
+      .select('description')
+      .eq('id', payload.eventId)
+      .single()
+
+    const updatedDescription = injectMetadataIntoDescription(currentOp?.description, {
+      isApplicationsClosed: payload.isClosed,
+      applicationsClosedAt: closedTime,
+    })
+
+    // 2. Update description in Supabase (persists permanently on standard Supabase schema)
+    const { error: descErr } = await adminClient
+      .from('opportunities')
+      .update({ description: updatedDescription })
+      .eq('id', payload.eventId)
+
+    if (descErr) {
+      console.warn('Notice updating opportunity description with closed apps meta:', descErr.message)
+    }
+
+    // 3. Also try updating dedicated columns in case they exist
+    try {
+      await adminClient
+        .from('opportunities')
+        .update({
+          is_applications_closed: payload.isClosed,
+          applications_closed_at: closedTime,
+        })
+        .eq('id', payload.eventId)
+    } catch (err) {
+      console.warn('Notice updating opportunity applications closed in DB:', err)
+    }
+
+    revalidatePath('/dashboard')
+    return { success: true }
+  } catch (err: any) {
+    console.error('Error toggling applications:', err)
     return { success: false, error: err?.message }
   }
 }

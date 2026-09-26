@@ -24,6 +24,7 @@ import { Logo } from '@/components/ui/Logo'
 import { logoutAction } from '@/app/actions/auth'
 import DeleteAccountModal from '@/components/ui/DeleteAccountModal'
 import OrganizationAboutEditorModal from '@/components/ui/OrganizationAboutEditorModal'
+import ProfileCompletionModal from '@/components/ui/ProfileCompletionModal'
 import { getStoredNotifications, markAllNotificationsRead, deleteNotification, AppNotification } from '@/lib/notifications'
 
 interface DashboardNavbarProps {
@@ -43,6 +44,12 @@ interface DashboardNavbarProps {
   }
   onSearchClick?: () => void
   onPostOpportunityClick?: () => void
+  onOpenProfileClick?: () => void
+  volunteerPreferences?: {
+    skills: string[]
+    interests: string[]
+    city: string
+  }
 }
 
 export default function DashboardNavbar({
@@ -50,11 +57,14 @@ export default function DashboardNavbar({
   profileStatus,
   onSearchClick,
   onPostOpportunityClick,
+  onOpenProfileClick,
+  volunteerPreferences,
 }: DashboardNavbarProps) {
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showAboutEditorModal, setShowAboutEditorModal] = useState(false)
+  const [showProfileModal, setShowProfileModal] = useState(false)
   const [notifications, setNotifications] = useState<AppNotification[]>([])
 
   const fullName = user.user_metadata?.full_name ?? user.email ?? 'Member'
@@ -152,6 +162,21 @@ export default function DashboardNavbar({
               <Calendar className="w-4 h-4 text-gray-500" />
               <span>Events & Opportunities</span>
             </a>
+
+            {role === 'volunteer' && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenProfileClick) onOpenProfileClick()
+                  else setShowProfileModal(true)
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 transition-all border-none bg-transparent cursor-pointer"
+                title="View & Edit your volunteer skills, interests, and city"
+              >
+                <User className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>My Profile</span>
+              </button>
+            )}
           </nav>
         </div>
 
@@ -353,17 +378,21 @@ export default function DashboardNavbar({
                       style={{ width: `${clientCompletion}%` }}
                     />
                   </div>
-                  <Link
-                    href="/onboarding"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="inline-block mt-2 text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:underline text-decoration-none"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false)
+                      if (onOpenProfileClick) onOpenProfileClick()
+                      else setShowProfileModal(true)
+                    }}
+                    className="inline-block mt-2 text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:underline border-none bg-transparent p-0 cursor-pointer text-left"
                   >
                     {clientCompletion >= 100
-                      ? 'Edit profile →'
+                      ? 'Edit profile details →'
                       : profileStatus.isNewUser
                       ? 'Complete profile now →'
                       : 'Finish remaining details →'}
-                  </Link>
+                  </button>
                 </div>
 
                 {/* Actions */}
@@ -382,14 +411,18 @@ export default function DashboardNavbar({
                     </button>
                   )}
 
-                  <Link
-                    href="/onboarding"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-colors text-decoration-none"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false)
+                      if (onOpenProfileClick) onOpenProfileClick()
+                      else setShowProfileModal(true)
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-colors border-none bg-transparent cursor-pointer text-left"
                   >
-                    <User className="w-4 h-4 text-gray-500" />
+                    <User className="w-4 h-4 text-emerald-600" />
                     <span>My Profile & Settings</span>
-                  </Link>
+                  </button>
 
                   <form action={logoutAction}>
                     <button
@@ -427,6 +460,20 @@ export default function DashboardNavbar({
           onClose={() => setShowAboutEditorModal(false)}
           organizationName={fullName}
           organizationId={user.id}
+        />
+      )}
+
+      {/* Volunteer Profile & Preferences Modal */}
+      {showProfileModal && role === 'volunteer' && (
+        <ProfileCompletionModal
+          isOpen={showProfileModal}
+          onClose={() => setShowProfileModal(false)}
+          userEmail={user.email}
+          userName={fullName}
+          userRole="volunteer"
+          initialCity={volunteerPreferences?.city}
+          initialSkills={volunteerPreferences?.skills}
+          initialInterests={volunteerPreferences?.interests}
         />
       )}
 

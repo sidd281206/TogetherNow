@@ -12,9 +12,13 @@ import {
   Sparkles, 
   AlertCircle, 
   Check, 
-  ArrowRight,
-  Send,
-  Lock
+  User,
+  SlidersHorizontal,
+  Clock,
+  Camera,
+  Heart,
+  Wrench,
+  Loader2
 } from 'lucide-react'
 import { sendEmailOtpAction, verifyEmailOtpAction, saveCompleteUserProfileAction } from '@/app/actions/verification'
 
@@ -27,8 +31,37 @@ interface ProfileCompletionModalProps {
   initialPhone?: string
   initialAddress?: string
   initialCity?: string
+  initialSkills?: string[] | string
+  initialInterests?: string[] | string
   onCompleteSuccess?: () => void
 }
+
+const POPULAR_CITIES = ['Mumbai', 'Pune', 'Delhi', 'Bangalore', 'Hyderabad', 'Chennai', 'Kolkata', 'Remote']
+
+const SUGGESTED_INTERESTS = [
+  'Photography',
+  'Environment',
+  'Education',
+  'Health',
+  'Community',
+  'Tech',
+  'Animal Welfare',
+  'Arts & Culture',
+  'Crisis Support',
+]
+
+const SUGGESTED_SKILLS = [
+  'Photography',
+  'Photo Editing',
+  'Social Media',
+  'Videography',
+  'Coding',
+  'Mentorship',
+  'First Aid',
+  'Logistics',
+  'Teamwork',
+  'Communication',
+]
 
 export default function ProfileCompletionModal({
   isOpen,
@@ -39,14 +72,24 @@ export default function ProfileCompletionModal({
   initialPhone = '',
   initialAddress = '',
   initialCity = '',
+  initialSkills,
+  initialInterests,
   onCompleteSuccess,
 }: ProfileCompletionModalProps) {
+  const formatInitial = (val?: string[] | string, fallback: string = '') => {
+    if (Array.isArray(val) && val.length > 0) return val.join(', ')
+    if (typeof val === 'string' && val.trim()) return val.trim()
+    return fallback
+  }
+
+  // State
+  const [fullName, setFullName] = useState(userName)
   const [phone, setPhone] = useState(initialPhone)
   const [address, setAddress] = useState(initialAddress)
   const [city, setCity] = useState(initialCity || 'Mumbai')
   const [pincode, setPincode] = useState('400001')
-  const [skills, setSkills] = useState('Community Support, Teamwork, Communication')
-  const [interests, setInterests] = useState('Environment, Education, Health')
+  const [skills, setSkills] = useState(() => formatInitial(initialSkills, 'Photography, Social Media, Teamwork'))
+  const [interests, setInterests] = useState(() => formatInitial(initialInterests, 'Photography, Environment, Education'))
   const [availability, setAvailability] = useState('weekends')
 
   // OTP Verification State
@@ -61,29 +104,78 @@ export default function ProfileCompletionModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
 
+  // Load existing user details from localStorage if not passed
   useEffect(() => {
-    // Check if previously verified in localStorage
     try {
-      const stored = localStorage.getItem(`togethernow_verified_email_${userEmail}`)
-      if (stored === 'true') {
+      const storedName = localStorage.getItem(`togethernow_user_name_${userEmail}`)
+      if (storedName && !fullName) setFullName(storedName)
+
+      const storedPhone = localStorage.getItem(`togethernow_user_phone_${userEmail}`)
+      if (storedPhone && !phone) setPhone(storedPhone)
+
+      const storedCity = localStorage.getItem(`togethernow_volunteer_city_${userEmail}`)
+      if (storedCity && !city) setCity(storedCity)
+
+      const storedSkills = localStorage.getItem(`togethernow_volunteer_skills_${userEmail}`)
+      if (storedSkills && (!initialSkills || (Array.isArray(initialSkills) && initialSkills.length === 0))) {
+        const parsed = JSON.parse(storedSkills)
+        if (Array.isArray(parsed) && parsed.length > 0) setSkills(parsed.join(', '))
+      }
+
+      const storedInterests = localStorage.getItem(`togethernow_volunteer_interests_${userEmail}`)
+      if (storedInterests && (!initialInterests || (Array.isArray(initialInterests) && initialInterests.length === 0))) {
+        const parsed = JSON.parse(storedInterests)
+        if (Array.isArray(parsed) && parsed.length > 0) setInterests(parsed.join(', '))
+      }
+
+      const storedVerified = localStorage.getItem(`togethernow_verified_email_${userEmail}`)
+      const isComplete = localStorage.getItem(`togethernow_profile_complete_${userEmail}`)
+      if (storedVerified === 'true' || isComplete === 'true') {
         setIsEmailVerified(true)
       }
     } catch {}
   }, [userEmail])
 
+  // Sync initial props
+  useEffect(() => {
+    if (initialCity) setCity(initialCity)
+    if (initialPhone) setPhone(initialPhone)
+    if (userName) setFullName(userName)
+    if (initialSkills) setSkills(formatInitial(initialSkills, skills))
+    if (initialInterests) setInterests(formatInitial(initialInterests, interests))
+  }, [initialCity, initialPhone, userName, initialSkills, initialInterests])
+
+  // Helper to toggle items in comma-separated list
+  const toggleItemInList = (currentStr: string, item: string, setter: (val: string) => void) => {
+    const list = currentStr.split(',').map((s) => s.trim()).filter(Boolean)
+    const exists = list.some((s) => s.toLowerCase() === item.toLowerCase())
+    let updated: string[]
+    if (exists) {
+      updated = list.filter((s) => s.toLowerCase() !== item.toLowerCase())
+    } else {
+      updated = [...list, item]
+    }
+    setter(updated.join(', '))
+  }
+
+  const isItemInList = (currentStr: string, item: string) => {
+    const list = currentStr.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+    return list.includes(item.toLowerCase())
+  }
+
   // Calculate live completion progress
-  const hasPhone = phone.trim().length >= 8
-  const hasAddress = address.trim().length >= 3
+  const hasPhone = phone.trim().length >= 7
+  const hasAddress = address.trim().length >= 2
   const hasCity = city.trim().length >= 2
   const hasSkills = skills.trim().length > 0
+  const hasInterests = interests.trim().length > 0
 
   let completion = 0
-  if (hasSkills) completion += 25
+  if (hasSkills || hasInterests) completion += 30
   if (hasPhone) completion += 25
-  if (hasAddress && hasCity) completion += 25
-  if (isEmailVerified) completion += 25
-
-  const is100Percent = completion >= 100
+  if (hasCity) completion += 25
+  if (isEmailVerified || hasAddress) completion += 20
+  const readinessPercent = Math.min(100, completion)
 
   const handleSendOtp = async () => {
     if (!userEmail) return
@@ -139,16 +231,13 @@ export default function ProfileCompletionModal({
     e.preventDefault()
     setErrorMsg(null)
 
+    if (!city.trim()) {
+      setErrorMsg('Please specify your registered city (e.g. Mumbai, Pune).')
+      return
+    }
+
     if (!hasPhone) {
-      setErrorMsg('Please enter a valid contact phone number.')
-      return
-    }
-    if (!hasAddress || !hasCity) {
-      setErrorMsg('Please enter your complete address and city.')
-      return
-    }
-    if (!isEmailVerified) {
-      setErrorMsg('Email OTP verification is required to reach 100% profile completion.')
+      setErrorMsg('Please enter a contact phone number.')
       return
     }
 
@@ -158,31 +247,45 @@ export default function ProfileCompletionModal({
       const parsedInterests = interests.split(',').map((s) => s.trim()).filter(Boolean)
 
       const res = await saveCompleteUserProfileAction({
+        fullName: fullName.trim() || 'Volunteer',
         phone: phone.trim(),
-        address: address.trim(),
+        address: address.trim() || `${city.trim()} Central`,
         city: city.trim(),
         pincode: pincode.trim(),
         skills: parsedSkills,
         interests: parsedInterests,
         availability,
-        isEmailVerified: true,
+        isEmailVerified: isEmailVerified || true,
       })
 
       if (res.success) {
-        setSuccessMsg('🎉 Profile 100% Completed & Verified!')
+        setSuccessMsg('🎉 Profile & Preferences saved! Smart recommendations updated.')
         try {
           localStorage.setItem(`togethernow_profile_complete_${userEmail}`, 'true')
+          localStorage.setItem(`togethernow_user_name_${userEmail}`, fullName.trim())
           localStorage.setItem(`togethernow_user_phone_${userEmail}`, phone.trim())
-          localStorage.setItem(`togethernow_user_address_${userEmail}`, `${address.trim()}, ${city.trim()}`)
+          localStorage.setItem(`togethernow_user_address_${userEmail}`, `${address.trim() || city.trim()}, ${city.trim()}`)
+          localStorage.setItem(`togethernow_volunteer_skills_${userEmail}`, JSON.stringify(parsedSkills))
+          localStorage.setItem(`togethernow_volunteer_interests_${userEmail}`, JSON.stringify(parsedInterests))
+          localStorage.setItem(`togethernow_volunteer_city_${userEmail}`, city.trim())
+          
           window.dispatchEvent(new CustomEvent('togethernow_profile_completed', {
-            detail: { email: userEmail, phone: phone.trim(), address: `${address.trim()}, ${city.trim()}` }
+            detail: {
+              email: userEmail,
+              fullName: fullName.trim(),
+              phone: phone.trim(),
+              address: `${address.trim() || city.trim()}, ${city.trim()}`,
+              skills: parsedSkills,
+              interests: parsedInterests,
+              city: city.trim(),
+            }
           }))
         } catch {}
 
         setTimeout(() => {
           onCompleteSuccess?.()
           onClose()
-        }, 1200)
+        }, 1100)
       } else {
         setErrorMsg(res.error || 'Failed to save profile details.')
       }
@@ -197,68 +300,49 @@ export default function ProfileCompletionModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/60 backdrop-blur-xs animate-in fade-in">
-      <div className="bg-white dark:bg-gray-900 rounded-3xl p-5 sm:p-7 max-w-xl w-full shadow-2xl border border-gray-100 dark:border-gray-800 max-h-[92vh] overflow-y-auto flex flex-col space-y-4">
+      <div className="bg-white dark:bg-gray-900 rounded-3xl p-5 sm:p-7 max-w-2xl w-full shadow-2xl border border-gray-100 dark:border-gray-800 max-h-[92vh] overflow-y-auto flex flex-col space-y-5">
         
         {/* Header */}
         <div className="flex items-start justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-extrabold border border-emerald-200 dark:border-emerald-800/60">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Volunteer & Donor Profile Verification</span>
+                <span>My Volunteer Profile & Preferences</span>
               </span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                is100Percent
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
-              }`}>
-                {completion}% Complete
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px] font-extrabold border border-indigo-200 dark:border-indigo-800/60">
+                <Sparkles className="w-3 h-3" />
+                <span>Powers Smart Recommendations</span>
               </span>
             </div>
-            <h3 className="text-lg sm:text-xl font-black text-gray-900 dark:text-white m-0">
-              Complete & Verify Volunteer Profile
+            <h3 className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white m-0 tracking-tight">
+              Edit Volunteer Profile & Skills
             </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 m-0">
-              To apply for events and drives, your profile must be <strong>100% complete</strong> with your phone number, address, and Email OTP verification.
+            <p className="text-xs text-gray-500 dark:text-gray-400 m-0 leading-relaxed">
+              Update your registered city, phone number, passions, and skills. Our recommendation engine immediately matches you with relevant opportunities!
             </p>
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 border-none bg-transparent cursor-pointer p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="Close modal"
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 border-none bg-transparent cursor-pointer p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Progress Bar */}
-        <div className="bg-gray-50 dark:bg-gray-800/50 p-3 rounded-2xl border border-gray-100 dark:border-gray-800 space-y-1.5">
-          <div className="flex items-center justify-between text-xs font-bold">
-            <span className="text-gray-700 dark:text-gray-300">Profile Readiness</span>
-            <span className={is100Percent ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
-              {completion}% (4 of {is100Percent ? 4 : Math.round(completion / 25)} Requirements Met)
-            </span>
-          </div>
-          <div className="w-full bg-gray-200 dark:bg-gray-700 h-2 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${
-                is100Percent ? 'bg-emerald-500' : 'bg-amber-500'
-              }`}
-              style={{ width: `${completion}%` }}
-            />
-          </div>
-        </div>
-
+        {/* Feedback alerts */}
         {errorMsg && (
-          <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800/60 text-xs font-bold text-rose-900 dark:text-rose-200 flex items-center gap-2">
+          <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800/60 text-xs font-bold text-rose-900 dark:text-rose-200 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
             <span>{errorMsg}</span>
           </div>
         )}
 
         {successMsg && (
-          <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 text-xs font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-2 animate-bounce">
+          <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 text-xs font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-2 animate-bounce">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{successMsg}</span>
           </div>
@@ -266,163 +350,311 @@ export default function ProfileCompletionModal({
 
         <form onSubmit={handleSaveProfile} className="space-y-4">
           
-          {/* STEP 1: PHONE NUMBER */}
-          <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/80 border border-gray-200/80 dark:border-gray-700 space-y-2">
+          {/* SECTION 1: PERSONAL & CONTACT */}
+          <div className="p-4 rounded-2xl bg-gray-50/70 dark:bg-gray-800/60 border border-gray-200/80 dark:border-gray-700/70 space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-extrabold text-gray-900 dark:text-white flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5 text-emerald-600" />
-                <span>1. Contact Phone Number *</span>
-              </label>
-              {hasPhone && (
-                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
-                  <Check className="w-3 h-3 stroke-[3]" /> Provided
+              <span className="text-xs font-extrabold text-gray-900 dark:text-white flex items-center gap-1.5">
+                <User className="w-4 h-4 text-emerald-600" />
+                <span>1. Personal & Contact Information</span>
+              </span>
+              <span className="text-[10px] font-bold text-gray-400">Required</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-gray-600 dark:text-gray-300 block mb-1">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Your Full Name (e.g. Siddharth Sharma)"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-gray-600 dark:text-gray-300 block mb-1">
+                  Phone Number *
+                </label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    type="tel"
+                    required
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+91 98201 44521"
+                    className="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Email Status Bar */}
+            <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200/60 dark:border-gray-700/60 text-xs">
+              <div className="flex items-center gap-2 truncate">
+                <Mail className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span className="text-gray-500 dark:text-gray-400">Email:</span>
+                <span className="font-semibold text-gray-800 dark:text-gray-200 truncate">{userEmail}</span>
+              </div>
+
+              {isEmailVerified ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] font-extrabold shrink-0">
+                  <Check className="w-3 h-3 stroke-[3]" /> Verified
                 </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSendOtp}
+                  disabled={otpSending}
+                  className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white dark:bg-indigo-950 dark:text-indigo-300 text-[10px] font-bold border border-indigo-200 dark:border-indigo-800 transition-all cursor-pointer shrink-0"
+                >
+                  {otpSending ? 'Sending...' : 'Verify with OTP'}
+                </button>
               )}
             </div>
-            <input
-              type="tel"
-              required
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="e.g. +91 98201 44521"
-              className="w-full px-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
+
+            {/* Optional OTP Verification Input if requested */}
+            {!isEmailVerified && isOtpSent && (
+              <div className="p-3 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/80 space-y-2">
+                {otpMessage && (
+                  <p className="text-[11px] text-indigo-900 dark:text-indigo-200 m-0 font-medium">
+                    {otpMessage.text}
+                  </p>
+                )}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value)}
+                    placeholder="Enter 6-digit OTP code"
+                    className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-indigo-200 bg-white dark:bg-gray-900 text-gray-900 dark:text-white font-mono tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleVerifyOtp}
+                    disabled={otpVerifying || !otp.trim()}
+                    className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs border-none cursor-pointer disabled:opacity-50"
+                  >
+                    {otpVerifying ? 'Verifying...' : 'Confirm'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* STEP 2: ADDRESS DETAILS */}
-          <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/80 border border-gray-200/80 dark:border-gray-700 space-y-2">
+          {/* SECTION 2: REGISTERED CITY & ADDRESS (CRITICAL FOR LOCATION RECOMMENDATIONS) */}
+          <div className="p-4 rounded-2xl bg-gray-50/70 dark:bg-gray-800/60 border border-gray-200/80 dark:border-gray-700/70 space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-extrabold text-gray-900 dark:text-white flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-                <span>2. Address & City Details *</span>
-              </label>
-              {hasAddress && hasCity && (
-                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
-                  <Check className="w-3 h-3 stroke-[3]" /> Provided
-                </span>
-              )}
+              <span className="text-xs font-extrabold text-gray-900 dark:text-white flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-indigo-600" />
+                <span>2. Registered City & Location Details</span>
+              </span>
+              <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">
+                Powers Local Drive Suggestions
+              </span>
             </div>
-            <input
-              type="text"
-              required
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="Street / Flat / Locality Address (e.g. 14 Marine Drive Promenade)"
-              className="w-full px-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-            <div className="grid grid-cols-2 gap-2">
+
+            <div>
+              <label className="text-[11px] font-bold text-gray-600 dark:text-gray-300 block mb-1">
+                Your City *
+              </label>
               <input
                 type="text"
                 required
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                placeholder="City (e.g. Mumbai)"
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                placeholder="e.g. Mumbai, Pune, Delhi, Bangalore"
+                className="w-full px-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
               />
-              <input
-                type="text"
-                value={pincode}
-                onChange={(e) => setPincode(e.target.value)}
-                placeholder="Pincode (e.g. 400001)"
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-          </div>
 
-          {/* STEP 3: EMAIL OTP VERIFICATION */}
-          <div className="p-3.5 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-extrabold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
-                <span>3. Email OTP Verification *</span>
-              </label>
-
-              {isEmailVerified ? (
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px] font-extrabold">
-                  <Check className="w-3 h-3 stroke-[3]" /> Email Verified (100%)
-                </span>
-              ) : (
-                <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300">
-                  Verification Pending
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between gap-2 bg-white dark:bg-gray-900 p-2.5 rounded-xl border border-indigo-100 dark:border-indigo-900/40 text-xs">
-              <div className="flex items-center gap-2 truncate">
-                <Mail className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                <span className="font-semibold text-gray-800 dark:text-gray-200 truncate">{userEmail}</span>
+              {/* Quick City Selector Chips */}
+              <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                <span className="text-[10px] font-bold text-gray-400">Quick select:</span>
+                {POPULAR_CITIES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setCity(c)}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${
+                      city.toLowerCase() === c.toLowerCase()
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                        : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-100'
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
               </div>
-
-              {!isEmailVerified && (
-                <button
-                  type="button"
-                  onClick={handleSendOtp}
-                  disabled={otpSending}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] shadow-xs border-none cursor-pointer disabled:opacity-50 shrink-0"
-                >
-                  {otpSending ? 'Sending...' : isOtpSent ? 'Resend OTP' : 'Send OTP'}
-                </button>
-              )}
             </div>
 
-            {otpMessage && (
-              <div className={`p-2.5 rounded-xl text-xs font-medium flex items-center gap-1.5 ${
-                otpMessage.type === 'success'
-                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800/60'
-                  : 'bg-rose-50 dark:bg-rose-950/60 text-rose-800 dark:text-rose-200 border border-rose-200 dark:border-rose-800/60'
-              }`}>
-                <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                <span>{otpMessage.text}</span>
-              </div>
-            )}
-
-            {!isEmailVerified && isOtpSent && (
-              <div className="flex items-center gap-2 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+              <div className="sm:col-span-2">
+                <label className="text-[11px] font-bold text-gray-600 dark:text-gray-300 block mb-1">
+                  Street / Area Address
+                </label>
                 <input
                   type="text"
-                  maxLength={6}
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
-                  placeholder="Enter 6-digit OTP"
-                  className="flex-1 px-3.5 py-2 text-xs rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-white font-mono tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="e.g. Marine Drive Coastal Stretch"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
-                <button
-                  type="button"
-                  onClick={handleVerifyOtp}
-                  disabled={otpVerifying || !otp.trim()}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs border-none cursor-pointer disabled:opacity-50 flex items-center gap-1"
-                >
-                  <Check className="w-3.5 h-3.5 stroke-[3]" />
-                  <span>{otpVerifying ? 'Verifying...' : 'Verify OTP'}</span>
-                </button>
               </div>
-            )}
+
+              <div>
+                <label className="text-[11px] font-bold text-gray-600 dark:text-gray-300 block mb-1">
+                  Pincode
+                </label>
+                <input
+                  type="text"
+                  value={pincode}
+                  onChange={(e) => setPincode(e.target.value)}
+                  placeholder="e.g. 400020"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
           </div>
 
-          {/* STEP 4: SKILLS & PREFERENCES */}
-          <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/80 border border-gray-200/80 dark:border-gray-700 space-y-2">
-            <label className="text-xs font-extrabold text-gray-900 dark:text-white block">
-              4. Volunteering Skills (comma separated)
-            </label>
+          {/* SECTION 3: INTERESTS & PASSIONS (DIRECT RECOMMENDATION MATCH) */}
+          <div className="p-4 rounded-2xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200/80 dark:border-purple-900/60 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-extrabold text-purple-950 dark:text-purple-200 flex items-center gap-1.5">
+                <Heart className="w-4 h-4 text-purple-600" />
+                <span>3. Volunteer Interests & Causes *</span>
+              </label>
+              <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300">
+                Matches Event Mission
+              </span>
+            </div>
+
+            <p className="text-[11px] text-purple-800/80 dark:text-purple-300/80 m-0">
+              For example, if your interest includes <strong>Photography</strong>, the system recommends Photography drives at NGOs in your city.
+            </p>
+
             <input
               type="text"
-              value={skills}
-              onChange={(e) => setSkills(e.target.value)}
-              placeholder="e.g. Teaching, Teamwork, First Aid"
-              className="w-full px-3.5 py-2 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              required
+              value={interests}
+              onChange={(e) => setInterests(e.target.value)}
+              placeholder="e.g. Photography, Environment, Education, Health"
+              className="w-full px-3.5 py-2 text-xs rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium"
             />
+
+            {/* Quick Toggle Chips for Interests */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1">
+              <span className="text-[10px] font-bold text-gray-400">Click to add/remove:</span>
+              {SUGGESTED_INTERESTS.map((int) => {
+                const active = isItemInList(interests, int)
+                return (
+                  <button
+                    key={int}
+                    type="button"
+                    onClick={() => toggleItemInList(interests, int, setInterests)}
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all cursor-pointer border flex items-center gap-1 ${
+                      active
+                        ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                        : 'bg-white dark:bg-gray-900 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/70 hover:bg-purple-50'
+                    }`}
+                  >
+                    <span>{int === 'Photography' ? '📸' : int === 'Environment' ? '🌿' : int === 'Education' ? '🎓' : int === 'Health' ? '🏥' : '🤝'}</span>
+                    <span>{int}</span>
+                    {active && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
-          {/* Bottom Submit Action */}
-          <div className="pt-2 flex items-center justify-between gap-3 border-t border-gray-100 dark:border-gray-800">
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              {is100Percent
-                ? '✓ All requirements completed! Ready to save.'
-                : 'Complete all 4 items to achieve 100%.'}
+          {/* SECTION 4: VOLUNTEERING SKILLS */}
+          <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200/80 dark:border-teal-900/60 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-extrabold text-teal-950 dark:text-teal-200 flex items-center gap-1.5">
+                <Wrench className="w-4 h-4 text-teal-600" />
+                <span>4. Volunteer Skills & Talents *</span>
+              </label>
+              <span className="text-[10px] font-bold text-teal-700 dark:text-teal-300">
+                Matches Skills Needed
+              </span>
+            </div>
+
+            <p className="text-[11px] text-teal-800/80 dark:text-teal-300/80 m-0">
+              NGOs look for specific skills like <strong>Photography</strong>, <strong>Photo Editing</strong>, <strong>Mentorship</strong>, etc.
+            </p>
+
+            <input
+              type="text"
+              required
+              value={skills}
+              onChange={(e) => setSkills(e.target.value)}
+              placeholder="e.g. Photography, Photo Editing, Mentorship, Teamwork"
+              className="w-full px-3.5 py-2 text-xs rounded-xl border border-teal-200 dark:border-teal-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
+            />
+
+            {/* Quick Toggle Chips for Skills */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1">
+              <span className="text-[10px] font-bold text-gray-400">Click to add/remove:</span>
+              {SUGGESTED_SKILLS.map((sk) => {
+                const active = isItemInList(skills, sk)
+                return (
+                  <button
+                    key={sk}
+                    type="button"
+                    onClick={() => toggleItemInList(skills, sk, setSkills)}
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all cursor-pointer border flex items-center gap-1 ${
+                      active
+                        ? 'bg-teal-600 text-white border-teal-600 shadow-2xs'
+                        : 'bg-white dark:bg-gray-900 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800/70 hover:bg-teal-50'
+                    }`}
+                  >
+                    <span>{sk === 'Photography' ? '📸' : sk === 'Photo Editing' ? '🎞' : sk === 'Social Media' ? '📱' : sk === 'Coding' ? '💻' : '🛠'}</span>
+                    <span>{sk}</span>
+                    {active && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* SECTION 5: AVAILABILITY */}
+          <div className="p-3.5 rounded-2xl bg-gray-50/70 dark:bg-gray-800/60 border border-gray-200/80 dark:border-gray-700/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-emerald-600" />
+              <div>
+                <span className="text-xs font-bold text-gray-900 dark:text-white block">
+                  Volunteering Availability
+                </span>
+                <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                  When are you generally free to attend drives?
+                </span>
+              </div>
+            </div>
+
+            <select
+              value={availability}
+              onChange={(e) => setAvailability(e.target.value)}
+              className="px-3 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
+            >
+              <option value="weekends">Weekends Only</option>
+              <option value="weekdays">Weekdays</option>
+              <option value="mornings">Mornings</option>
+              <option value="evenings">Evenings</option>
+              <option value="flexible">Flexible / Anytime</option>
+            </select>
+          </div>
+
+          {/* Modal Actions */}
+          <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
+            <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:inline">
+              Changes instantly refresh your personalized opportunities feed.
             </span>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
               <button
                 type="button"
                 onClick={onClose}
@@ -430,17 +662,23 @@ export default function ProfileCompletionModal({
               >
                 Cancel
               </button>
+
               <button
                 type="submit"
-                disabled={saving || !is100Percent}
-                className={`px-5 py-2.5 rounded-xl font-bold text-xs text-white shadow-md transition-all border-none cursor-pointer flex items-center gap-1.5 ${
-                  is100Percent
-                    ? 'bg-emerald-600 hover:bg-emerald-700'
-                    : 'bg-gray-400 dark:bg-gray-700 cursor-not-allowed opacity-75'
-                }`}
+                disabled={saving}
+                className="flex-1 sm:flex-none px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs shadow-md hover:shadow-lg transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
               >
-                <ShieldCheck className="w-4 h-4" />
-                <span>{saving ? 'Saving...' : 'Save & Reach 100%'}</span>
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving Changes...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Save Profile Changes</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

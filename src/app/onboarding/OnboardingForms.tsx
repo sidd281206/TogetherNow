@@ -9,18 +9,36 @@ const initialState: OnboardingState = null
 
 interface VolunteerOnboardingFormProps {
   userEmail?: string
+  initialData?: {
+    fullName?: string
+    phone?: string
+    address?: string
+    city?: string
+    pincode?: string
+    skills?: string[]
+    interests?: string[]
+    availability?: string
+  } | null
 }
 
-export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org' }: VolunteerOnboardingFormProps) {
+export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org', initialData }: VolunteerOnboardingFormProps) {
   const [state, action, pending] = useActionState(completeVolunteerProfileAction, initialState)
 
   // OTP States
   const [otp, setOtp] = useState('')
   const [isOtpSent, setIsOtpSent] = useState(false)
-  const [isEmailVerified, setIsEmailVerified] = useState(false)
+  const [isEmailVerified, setIsEmailVerified] = useState(Boolean(initialData))
   const [otpSending, setOtpSending] = useState(false)
   const [otpVerifying, setOtpVerifying] = useState(false)
   const [otpNotice, setOtpNotice] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+
+  const defaultSkills = initialData?.skills && initialData.skills.length > 0
+    ? initialData.skills.join(', ')
+    : 'Photography, Social Media, Teamwork'
+
+  const defaultInterests = initialData?.interests && initialData.interests.length > 0
+    ? initialData.interests.join(', ')
+    : 'Photography, Environment, Education'
 
   const handleSendOtp = async () => {
     setOtpSending(true)
@@ -81,6 +99,7 @@ export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org
           name="phone"
           type="tel"
           required
+          defaultValue={initialData?.phone || ''}
           placeholder="e.g. +91 98201 44521"
           className={`auth-input ${state?.errors?.phone ? 'auth-input-error' : ''}`}
         />
@@ -95,6 +114,7 @@ export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org
           name="address"
           type="text"
           required
+          defaultValue={initialData?.address || ''}
           placeholder="e.g. Flat 402, Green Valley Apartments, Andheri West"
           className={`auth-input ${state?.errors?.address ? 'auth-input-error' : ''}`}
         />
@@ -108,7 +128,7 @@ export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org
             name="city"
             type="text"
             required
-            defaultValue="Mumbai"
+            defaultValue={initialData?.city || 'Mumbai'}
             placeholder="e.g. Mumbai"
             className="auth-input"
           />
@@ -119,7 +139,7 @@ export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org
             id="pincode"
             name="pincode"
             type="text"
-            defaultValue="400053"
+            defaultValue={initialData?.pincode || '400053'}
             placeholder="e.g. 400053"
             className="auth-input"
           />
@@ -132,7 +152,7 @@ export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
           <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#312e81', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <KeyRound style={{ width: '16px', height: '16px', color: '#4f46e5' }} />
-            Email OTP Verification *
+            Email Status
           </span>
           {isEmailVerified ? (
             <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#047857', backgroundColor: '#d1fae5', padding: '2px 8px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -140,7 +160,7 @@ export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org
             </span>
           ) : (
             <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#b45309' }}>
-              Verification Required
+              Verification Pending
             </span>
           )}
         </div>
@@ -198,8 +218,8 @@ export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org
           id="skills"
           name="skills"
           type="text"
-          defaultValue="Community Support, Teamwork, Communication"
-          placeholder="e.g. Teaching, Coding, Medical, First Aid"
+          defaultValue={defaultSkills}
+          placeholder="e.g. Photography, Teaching, Coding, Medical, First Aid"
           className={`auth-input ${state?.errors?.skills ? 'auth-input-error' : ''}`}
         />
         {state?.errors?.skills && <p className="auth-field-error">{state.errors.skills[0]}</p>}
@@ -212,8 +232,8 @@ export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org
           id="interests"
           name="interests"
           type="text"
-          defaultValue="Environment, Education, Health"
-          placeholder="e.g. Education, Healthcare, Environment"
+          defaultValue={defaultInterests}
+          placeholder="e.g. Photography, Education, Healthcare, Environment"
           className={`auth-input ${state?.errors?.interests ? 'auth-input-error' : ''}`}
         />
         {state?.errors?.interests && <p className="auth-field-error">{state.errors.interests[0]}</p>}
@@ -225,7 +245,7 @@ export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org
         <select 
           id="availability" 
           name="availability" 
-          defaultValue="weekends"
+          defaultValue={initialData?.availability || 'weekends'}
           className={`auth-input ${state?.errors?.availability ? 'auth-input-error' : ''}`}
         >
           <option value="weekends">Weekends</option>
@@ -237,7 +257,7 @@ export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org
       </div>
 
       <button type="submit" disabled={pending} className="auth-btn-primary">
-        {pending ? 'Saving...' : 'Complete Profile & Unlock Events (100%)'}
+        {pending ? 'Saving Changes...' : initialData ? 'Save Profile Changes' : 'Complete Profile & Unlock Events (100%)'}
       </button>
     </form>
   )

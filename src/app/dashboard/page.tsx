@@ -36,6 +36,8 @@ export default async function DashboardPage() {
 
   let orgStatus: 'unsubmitted' | 'pending' | 'approved' | 'rejected' = 'approved'
 
+  let volunteerPreferences: { skills: string[]; interests: string[]; city: string } | undefined
+
   // Check profile in database and user metadata
   if (role === 'volunteer' || role === 'donor') {
     const userMeta = user.user_metadata || {}
@@ -51,6 +53,20 @@ export default async function DashboardPage() {
       .select('*')
       .eq('id', user.id)
       .maybeSingle()
+
+    const parseStringArray = (val: any): string[] => {
+      if (Array.isArray(val)) return val.filter(Boolean).map(String)
+      if (typeof val === 'string' && val.trim()) {
+        return val.split(',').map((s) => s.trim()).filter(Boolean)
+      }
+      return []
+    }
+
+    volunteerPreferences = {
+      skills: parseStringArray(volProfile?.skills || userMeta.skills),
+      interests: parseStringArray(volProfile?.interests || userMeta.interests),
+      city: (userProfile as any)?.city || userMeta.city || (userProfile as any)?.location || '',
+    }
 
     if (userMeta.profile_completed || userMeta.completionPercentage === 100) {
       completionPercentage = 100
@@ -130,5 +146,12 @@ export default async function DashboardPage() {
     missingFields,
   }
 
-  return <DashboardClient user={user} profileStatus={profileStatus} organizationName={organizationName} />
+  return (
+    <DashboardClient
+      user={user}
+      profileStatus={profileStatus}
+      organizationName={organizationName}
+      volunteerPreferences={volunteerPreferences}
+    />
+  )
 }

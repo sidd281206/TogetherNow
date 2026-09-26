@@ -16,15 +16,41 @@ export default async function OnboardingPage() {
 
   const role: string = user.user_metadata?.role ?? 'volunteer'
   let initialOrgData = null
+  let initialVolunteerData = null
 
   if (role === 'volunteer') {
     const { data: volProfile } = await supabase
       .from('volunteer_profiles')
-      .select('id')
+      .select('*')
       .eq('id', user.id)
       .maybeSingle()
 
-    if (volProfile) redirect('/dashboard')
+    const { data: userProfile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    const parseList = (val: any): string[] => {
+      if (Array.isArray(val)) return val.filter(Boolean).map(String)
+      if (typeof val === 'string' && val.trim()) {
+        return val.split(',').map((s) => s.trim()).filter(Boolean)
+      }
+      return []
+    }
+
+    if (volProfile || userProfile || user.user_metadata?.skills || user.user_metadata?.city) {
+      initialVolunteerData = {
+        fullName: userProfile?.full_name || user.user_metadata?.full_name || '',
+        phone: userProfile?.phone || user.user_metadata?.phone || '',
+        address: userProfile?.address || user.user_metadata?.address || '',
+        city: (userProfile as any)?.city || user.user_metadata?.city || '',
+        pincode: (userProfile as any)?.pincode || user.user_metadata?.pincode || '',
+        skills: parseList(volProfile?.skills || user.user_metadata?.skills),
+        interests: parseList(volProfile?.interests || user.user_metadata?.interests),
+        availability: volProfile?.availability || user.user_metadata?.availability || 'weekends',
+      }
+    }
   } else if (role === 'organization') {
     const { data: orgProfile } = await supabase
       .from('organizations')
@@ -54,11 +80,15 @@ export default async function OnboardingPage() {
       <div className="auth-form-card" style={{ maxWidth: '600px', width: '100%' }}>
         <div className="auth-form-header">
           <h2 className="auth-form-title">
-            {initialOrgData ? 'Re-submit Organization Verification' : 'Verify Your Organization'}
+            {role === 'volunteer'
+              ? (initialVolunteerData ? 'Edit My Volunteer Profile' : 'Complete Volunteer Profile')
+              : initialOrgData
+              ? 'Re-submit Organization Verification'
+              : 'Verify Your Organization'}
           </h2>
           <p className="auth-form-subtitle">
             {role === 'volunteer' 
-              ? 'Tell us about your skills and interests to find the best opportunities.'
+              ? 'Update your city, phone number, interests, and skills to personalize opportunity recommendations.'
               : initialOrgData
               ? 'Review or update your organization details, registration number, or verification document below.'
               : 'Verify your organization to start posting opportunities.'}
@@ -66,7 +96,10 @@ export default async function OnboardingPage() {
         </div>
         
         {role === 'volunteer' ? (
-          <VolunteerOnboardingForm userEmail={user.email || ''} />
+          <VolunteerOnboardingForm
+            userEmail={user.email || ''}
+            initialData={initialVolunteerData}
+          />
         ) : (
           <OrganizationOnboardingForm
             initialData={initialOrgData}

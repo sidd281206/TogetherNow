@@ -31,6 +31,9 @@ import { getStoredNotifications, AppNotification } from '@/lib/notifications'
 import OrganizationAboutModal from '@/components/ui/OrganizationAboutModal'
 import OrganizationRatingModal from '@/components/ui/OrganizationRatingModal'
 import { getOrgRatingSummary, hasVolunteerReviewedEvent } from '@/lib/ratings'
+import RecommendedOpportunitiesSection from '@/components/ui/RecommendedOpportunitiesSection'
+import ProfileCompletionModal from '@/components/ui/ProfileCompletionModal'
+import { VolunteerPreferences } from '@/lib/recommendations'
 
 interface VolunteerDashboardProps {
   opportunitiesRef?: React.RefObject<OpportunitiesFeedRef | null>
@@ -43,6 +46,11 @@ interface VolunteerDashboardProps {
     role: string
     missingFields?: string[]
   }
+  volunteerPreferences?: {
+    skills: string[]
+    interests: string[]
+    city: string
+  }
 }
 
 const APPLICANTS_STORAGE_KEY = 'togethernow_event_applicants_v1'
@@ -52,19 +60,76 @@ function getGoogleMapsUrl(addressOrLocation: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressOrLocation)}`
 }
 
-export default function VolunteerDashboard({ opportunitiesRef, userId, userEmail, userName, profileStatus }: VolunteerDashboardProps) {
+export default function VolunteerDashboard({
+  opportunitiesRef,
+  userId,
+  userEmail,
+  userName,
+  profileStatus,
+  volunteerPreferences,
+}: VolunteerDashboardProps) {
   // Scope ALL localStorage keys by userId so data is never shared between accounts
   const userScopeId = userId || userEmail || 'guest'
   const APPLICANTS_KEY = `togethernow_event_applicants_v1_${userScopeId}`
   const OPPORTUNITIES_KEY = `togethernow_posted_opportunities`  // opportunities are global (org posts them)
   const NOTIFICATIONS_KEY = `togethernow_notifications_v1_${userScopeId}`
   const [userApplications, setUserApplications] = useState<Applicant[]>([])
-  const [opportunities, setOpportunities] = useState<Opportunity[]>([])
+  const [opportunities, setOpportunities] = useState<Opportunity[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const localOps = localStorage.getItem(OPPORTUNITIES_STORAGE_KEY)
+        if (localOps) {
+          const parsed = JSON.parse(localOps)
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        }
+      } catch {}
+    }
+    return INITIAL_OPPORTUNITIES
+  })
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [viewingOpportunity, setViewingOpportunity] = useState<Opportunity | null>(null)
   const [selectedOrgForAbout, setSelectedOrgForAbout] = useState<string | null>(null)
   const [ratingEvent, setRatingEvent] = useState<{ op: Opportunity; app: Applicant } | null>(null)
   const [reviewedEventsMap, setReviewedEventsMap] = useState<Record<string, boolean>>({})
+  const [showEditPreferencesModal, setShowEditPreferencesModal] = useState(false)
+
+  const [preferences, setPreferences] = useState<VolunteerPreferences>(() => {
+    if (volunteerPreferences && (volunteerPreferences.skills.length > 0 || volunteerPreferences.interests.length > 0 || volunteerPreferences.city)) {
+      return volunteerPreferences
+    }
+    try {
+      const storedSkills = localStorage.getItem(`togethernow_volunteer_skills_${userScopeId}`) || localStorage.getItem(`togethernow_volunteer_skills_${userEmail}`)
+      const storedInterests = localStorage.getItem(`togethernow_volunteer_interests_${userScopeId}`) || localStorage.getItem(`togethernow_volunteer_interests_${userEmail}`)
+      const storedCity = localStorage.getItem(`togethernow_volunteer_city_${userScopeId}`) || localStorage.getItem(`togethernow_volunteer_city_${userEmail}`)
+      return {
+        skills: storedSkills ? JSON.parse(storedSkills) : [],
+        interests: storedInterests ? JSON.parse(storedInterests) : [],
+        city: storedCity || '',
+      }
+    } catch {
+      return { skills: [], interests: [], city: '' }
+    }
+  })
+
+  useEffect(() => {
+    if (volunteerPreferences && (volunteerPreferences.skills.length > 0 || volunteerPreferences.interests.length > 0 || volunteerPreferences.city)) {
+      setPreferences(volunteerPreferences)
+    }
+  }, [volunteerPreferences])
+
+  useEffect(() => {
+    const handleProfileSaved = (e: any) => {
+      if (e?.detail) {
+        setPreferences((prev) => ({
+          skills: e.detail.skills || prev.skills,
+          interests: e.detail.interests || prev.interests,
+          city: e.detail.city || prev.city,
+        }))
+      }
+    }
+    window.addEventListener('togethernow_profile_completed', handleProfileSaved)
+    return () => window.removeEventListener('togethernow_profile_completed', handleProfileSaved)
+  }, [])
 
   const refreshData = () => {
     try {
@@ -150,9 +215,16 @@ export default function VolunteerDashboard({ opportunitiesRef, userId, userEmail
           dbOps.forEach((dbOp) => {
             const existing = map.get(dbOp.id)
             if (existing) {
+              const isClosed = Boolean(dbOp.isApplicationsClosed || existing.isApplicationsClosed)
               map.set(dbOp.id, {
                 ...existing,
                 ...dbOp,
+                isApplicationsClosed: isClosed,
+                applicationsClosedAt: dbOp.applicationsClosedAt || existing.applicationsClosedAt,
+                isCompleted: Boolean(dbOp.isCompleted || existing.isCompleted),
+                completedAt: dbOp.completedAt || existing.completedAt,
+                isCancelled: Boolean(dbOp.isCancelled || existing.isCancelled),
+                cancelledAt: dbOp.cancelledAt || existing.cancelledAt,
                 date: (dbOp.date && dbOp.date !== 'Upcoming') ? dbOp.date : (existing.date || dbOp.date || 'Upcoming'),
                 time: (dbOp.time && dbOp.time !== 'Flexible' && dbOp.time !== 'To be scheduled') ? dbOp.time : (existing.time || dbOp.time || '09:00 AM - 01:00 PM'),
                 address: (dbOp.address && dbOp.address !== 'Local Community Center' && dbOp.address !== 'Remote') ? dbOp.address : (existing.address || dbOp.address || existing.location),
@@ -243,7 +315,7 @@ export default function VolunteerDashboard({ opportunitiesRef, userId, userEmail
   )
 
   return (
-    <div className="space-y-8">
+    <div suppressHydrationWarning className="space-y-8">
       {/* Latest Approval Notification Banner (if recent approval occurred) */}
       {latestApprovalNotification && latestApprovalNotification.unread && (
         <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white shadow-xl flex items-center justify-between gap-4 animate-in slide-in-from-top-2 border border-emerald-400/30">
@@ -267,6 +339,15 @@ export default function VolunteerDashboard({ opportunitiesRef, userId, userEmail
           </div>
         </div>
       )}
+
+      {/* Personalized Smart Recommendations Section - Displayed Prominently at Top of Dashboard */}
+      <RecommendedOpportunitiesSection
+        opportunities={opportunities}
+        preferences={preferences}
+        onSelectOpportunity={(op) => setViewingOpportunity(op)}
+        onEditPreferences={() => setShowEditPreferencesModal(true)}
+        onViewAllClick={() => opportunitiesRef?.current?.filterToRecommended?.()}
+      />
 
       {/* Quick Impact Overview Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -784,18 +865,37 @@ export default function VolunteerDashboard({ opportunitiesRef, userId, userEmail
                 <span className="text-xs text-gray-400 font-medium">Virtual / Remote Event</span>
               )}
 
-              <button
-                type="button"
-                onClick={() => setViewingOpportunity(null)}
-                className="px-5 py-2 rounded-xl bg-gray-900 text-white dark:bg-white dark:text-gray-900 font-bold text-xs border-none cursor-pointer"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                {viewingOpportunity.isApplicationsClosed ? (
+                  <span className="px-3.5 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-bold text-xs border border-gray-200 dark:border-gray-700">
+                    Applications Closed
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewingOpportunity(null)
+                      opportunitiesRef?.current?.filterToRecommended?.()
+                    }}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs border-none cursor-pointer transition-all shadow-xs"
+                  >
+                    Apply in Feed
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setViewingOpportunity(null)}
+                  className="px-4 py-2 rounded-xl bg-gray-900 text-white dark:bg-white dark:text-gray-900 font-bold text-xs border-none cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
 
           </div>
         </div>
       )}
+
 
       {/* Main Opportunities & Events Feed */}
       <OpportunitiesFeed
@@ -804,7 +904,25 @@ export default function VolunteerDashboard({ opportunitiesRef, userId, userEmail
         userId={userId}
         userEmail={userEmail}
         userProfileStatus={profileStatus}
+        volunteerPreferences={preferences}
       />
+
+      {/* Profile & Preferences Modal for Editing Skills / Interests / City */}
+      {showEditPreferencesModal && (
+        <ProfileCompletionModal
+          isOpen={showEditPreferencesModal}
+          onClose={() => setShowEditPreferencesModal(false)}
+          userEmail={userEmail}
+          userName={userName}
+          userRole="volunteer"
+          initialCity={preferences.city}
+          initialSkills={preferences.skills}
+          initialInterests={preferences.interests}
+          onCompleteSuccess={() => {
+            setShowEditPreferencesModal(false)
+          }}
+        />
+      )}
 
       {/* Organization About Us & Trust Modal (Know More) */}
       {selectedOrgForAbout && (

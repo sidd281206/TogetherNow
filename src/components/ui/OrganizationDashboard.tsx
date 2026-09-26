@@ -32,7 +32,11 @@ import {
   RotateCcw,
   Trash2,
   Edit3,
-  Star
+  Star,
+  Lock,
+  Download,
+  Printer,
+  Copy
 } from 'lucide-react'
 import ResubmitApplicationButton from '@/components/ui/ResubmitApplicationButton'
 import { 
@@ -42,6 +46,7 @@ import {
   markOpportunityCompletedAction,
   fetchOpportunitiesAction,
   fetchApplicantsAction,
+  toggleApplicationsAction,
 } from '@/app/actions/opportunities'
 import { createClient } from '@/lib/supabase/client'
 import { pushNotification } from '@/lib/notifications'
@@ -187,6 +192,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
   const [cancellingDrive, setCancellingDrive] = useState<Opportunity | null>(null)
   const [cancelReasonInput, setCancelReasonInput] = useState('')
   const [confirmCompleteDrive, setConfirmCompleteDrive] = useState<Opportunity | null>(null)
+  const [confirmCloseAppsDrive, setConfirmCloseAppsDrive] = useState<Opportunity | null>(null)
 
   // Edit Event Contact & In-Charge Modal
   const [editingContactDrive, setEditingContactDrive] = useState<Opportunity | null>(null)
@@ -216,6 +222,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     const updatedManagerPhone = editManagerPhone.trim()
     const updatedAddress = editAddress.trim() || editingContactDrive.address || editingContactDrive.location
 
+    let updatedOps: Opportunity[] | null = null
     setOpportunities((prev) => {
       const updated = prev.map((op) => {
         if (op.id === editingContactDrive.id) {
@@ -228,14 +235,18 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
         }
         return op
       })
-
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-        window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
-      } catch {}
-
+      updatedOps = updated
       return updated
     })
+
+    if (updatedOps) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedOps))
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updatedOps }))
+        }, 0)
+      } catch {}
+    }
 
     if (inspectingDrive && inspectingDrive.id === editingContactDrive.id) {
       setInspectingDrive((prev) =>
@@ -303,9 +314,16 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
           dbOps.forEach((dbOp) => {
             const existing = map.get(dbOp.id)
             if (existing) {
+              const isClosed = Boolean(dbOp.isApplicationsClosed || existing.isApplicationsClosed)
               map.set(dbOp.id, {
                 ...existing,
                 ...dbOp,
+                isApplicationsClosed: isClosed,
+                applicationsClosedAt: dbOp.applicationsClosedAt || existing.applicationsClosedAt,
+                isCompleted: Boolean(dbOp.isCompleted || existing.isCompleted),
+                completedAt: dbOp.completedAt || existing.completedAt,
+                isCancelled: Boolean(dbOp.isCancelled || existing.isCancelled),
+                cancelledAt: dbOp.cancelledAt || existing.cancelledAt,
                 date: (dbOp.date && dbOp.date !== 'Upcoming') ? dbOp.date : (existing.date || dbOp.date || 'Upcoming'),
                 time: (dbOp.time && dbOp.time !== 'Flexible' && dbOp.time !== 'To be scheduled') ? dbOp.time : (existing.time || dbOp.time || '09:00 AM - 01:00 PM'),
                 address: (dbOp.address && dbOp.address !== 'Local Community Center' && dbOp.address !== 'Remote') ? dbOp.address : (existing.address || dbOp.address || existing.location),
@@ -370,12 +388,14 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     syncWithDb()
 
     const handleUpdate = (e: any) => {
-      if (e?.detail && Array.isArray(e.detail)) {
-        setOpportunities(e.detail)
-      } else {
-        loadData()
-        syncWithDb()
-      }
+      setTimeout(() => {
+        if (e?.detail && Array.isArray(e.detail)) {
+          setOpportunities(e.detail)
+        } else {
+          loadData()
+          syncWithDb()
+        }
+      }, 0)
     }
 
     const handleFocusSync = () => {
@@ -520,6 +540,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     })
 
     // 2. Update opportunities spots (pure updater — dispatch deferred)
+    let updatedSpotsOps: Opportunity[] | null = null
     setOpportunities((prev) => {
       const updated = prev.map((o) => {
         if (o.id !== ev.id) return o
@@ -532,15 +553,18 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
           : currentReg
         return { ...o, alreadyRegistered: newReg, spotsLeft: Math.max(0, totalReq - newReg) }
       })
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-        // Defer dispatch so it doesn't fire inside a state updater (prevents re-entrant state reads)
-        queueMicrotask(() => {
-          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
-        })
-      } catch {}
+      updatedSpotsOps = updated
       return updated
     })
+
+    if (updatedSpotsOps) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSpotsOps))
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updatedSpotsOps }))
+        }, 0)
+      } catch {}
+    }
 
     // 3. Update inspecting drive spots (pure updater)
     setInspectingDrive((prev) => {
@@ -606,18 +630,25 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     const evId = cancellingDrive.id
     const evTitle = cancellingDrive.title
 
+    let updatedOps: Opportunity[] | null = null
     setOpportunities((prev) => {
       const updated = prev.map((op) =>
         op.id === evId
           ? { ...op, isCancelled: true, cancelledAt: new Date().toISOString(), cancelReason: reason }
           : op
       )
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-        window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
-      } catch {}
+      updatedOps = updated
       return updated
     })
+
+    if (updatedOps) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedOps))
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updatedOps }))
+        }, 0)
+      } catch {}
+    }
 
     const enrolled = applicants.filter((a) => a.eventId === evId)
     enrolled.forEach((app) => {
@@ -656,18 +687,25 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
 
   // Restore Event
   const handleRestoreDrive = (eventId: string) => {
+    let updatedOps: Opportunity[] | null = null
     setOpportunities((prev) => {
       const updated = prev.map((op) =>
         op.id === eventId
           ? { ...op, isCancelled: false, cancelledAt: undefined, cancelReason: undefined }
           : op
       )
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-        window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
-      } catch {}
+      updatedOps = updated
       return updated
     })
+
+    if (updatedOps) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedOps))
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updatedOps }))
+        }, 0)
+      } catch {}
+    }
 
     pushNotification({
       targetRole: 'organization',
@@ -688,18 +726,25 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
   const executeCompleteDrive = (drive: Opportunity) => {
     const completedTime = new Date().toISOString()
 
+    let updatedOps: Opportunity[] | null = null
     setOpportunities((prev) => {
       const updated = prev.map((op) =>
         op.id === drive.id
           ? { ...op, isCompleted: true, completedAt: completedTime }
           : op
       )
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-        window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
-      } catch {}
+      updatedOps = updated
       return updated
     })
+
+    if (updatedOps) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedOps))
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updatedOps }))
+        }, 0)
+      } catch {}
+    }
 
     const enrolled = applicants.filter((a) => a.eventId === drive.id && a.status === 'accepted')
     enrolled.forEach((app) => {
@@ -737,8 +782,184 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     setConfirmCompleteDrive(null)
   }
 
+  // Stop / Re-open Accepting Applications
+  const handleToggleApplications = async (eventId: string, isClosed: boolean) => {
+    const closedTime = isClosed ? new Date().toISOString() : undefined
+
+    let updatedOps: Opportunity[] | null = null
+    setOpportunities((prev) => {
+      const updated = prev.map((o) =>
+        o.id === eventId
+          ? {
+              ...o,
+              isApplicationsClosed: isClosed,
+              applicationsClosedAt: closedTime,
+            }
+          : o
+      )
+      updatedOps = updated
+      return updated
+    })
+
+    if (updatedOps) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedOps))
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updatedOps }))
+        }, 0)
+      } catch {}
+    }
+
+    setInspectingDrive((prev) => {
+      if (!prev || prev.id !== eventId) return prev
+      return {
+        ...prev,
+        isApplicationsClosed: isClosed,
+        applicationsClosedAt: closedTime,
+      }
+    })
+
+    if (isClosed) {
+      setCandidateFilter('accepted')
+    }
+
+    try {
+      await toggleApplicationsAction({
+        eventId,
+        isClosed,
+        applicationsClosedAt: closedTime,
+      })
+    } catch (err) {
+      console.warn('Notice updating database toggleApplicationsAction:', err)
+    }
+
+    pushNotification({
+      targetRole: 'organization',
+      type: 'approval',
+      eventId,
+      title: isClosed ? '🔒 Applications Closed' : '🔓 Applications Re-opened',
+      message: isClosed
+        ? 'Applications for this event have been stopped. The final volunteer roster is now locked.'
+        : 'Applications have been re-opened for this event.',
+    })
+  }
+
+  // Export Finalized Volunteers to CSV
+  const handleExportCsv = (eventTitle: string, finalizedVolunteers: Applicant[]) => {
+    if (finalizedVolunteers.length === 0) {
+      alert('No approved volunteers to export yet. Approve applicants to build your finalized roster.')
+      return
+    }
+    const headers = ['#', 'Volunteer Name', 'Phone Number', 'Email Address', 'Verified Skills', 'Applied Date', 'Attendance Status']
+    const rows = finalizedVolunteers.map((v, idx) => [
+      idx + 1,
+      `"${(v.name || 'Volunteer').replace(/"/g, '""')}"`,
+      `"${(v.phone || 'N/A').replace(/"/g, '""')}"`,
+      `"${(v.email || 'N/A').replace(/"/g, '""')}"`,
+      `"${(v.skills?.join(', ') || 'N/A').replace(/"/g, '""')}"`,
+      `"${(v.appliedAt || 'N/A').replace(/"/g, '""')}"`,
+      `"${attendanceMap[v.id] ? 'Present' : 'Confirmed'}"`
+    ])
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${eventTitle.replace(/[^a-zA-Z0-9]/g, '_')}_Final_Volunteer_List.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  // Print Finalized Volunteer Attendance Sheet
+  const handlePrintRoster = (drive: Opportunity, finalizedVolunteers: Applicant[]) => {
+    if (finalizedVolunteers.length === 0) {
+      alert('No approved volunteers to print yet.')
+      return
+    }
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) return
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Final Volunteer List - ${drive.title}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 30px; color: #111; line-height: 1.4; }
+            h1 { margin: 0 0 6px 0; font-size: 22px; }
+            .meta { font-size: 13px; color: #555; margin-bottom: 24px; padding-bottom: 12px; border-bottom: 2px solid #e4e4e7; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #d4d4d8; padding: 10px 12px; text-align: left; }
+            th { background: #f4f4f5; font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+            tr:nth-child(even) { background: #fafafa; }
+            .check-col { width: 90px; text-align: center; }
+            .sig-col { width: 140px; }
+            @media print {
+              @page { margin: 15mm; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${drive.title}</h1>
+          <div class="meta">
+            <strong>Organization:</strong> ${drive.organization} &nbsp;|&nbsp;
+            <strong>Date:</strong> ${drive.date || 'Upcoming'} &nbsp;|&nbsp;
+            <strong>Time:</strong> ${drive.time || 'Flexible'} &nbsp;|&nbsp;
+            <strong>Location:</strong> ${drive.address || drive.location} &nbsp;|&nbsp;
+            <strong>Total Finalized Volunteers:</strong> ${finalizedVolunteers.length}
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 30px;">#</th>
+                <th>Volunteer Name</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Skills</th>
+                <th class="check-col">Present [✓]</th>
+                <th class="sig-col">Volunteer Signature</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${finalizedVolunteers.map((v, i) => `
+                <tr>
+                  <td>${i + 1}</td>
+                  <td><strong>${v.name}</strong></td>
+                  <td>${v.phone || 'N/A'}</td>
+                  <td>${v.email || 'N/A'}</td>
+                  <td>${v.skills?.join(', ') || '-'}</td>
+                  <td class="check-col">[ &nbsp;&nbsp; ]</td>
+                  <td class="sig-col"></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <script>
+            window.onload = function() { window.print(); }
+          </script>
+        </body>
+      </html>
+    `
+    printWindow.document.write(html)
+    printWindow.document.close()
+  }
+
+  // Copy Volunteer Contacts to Clipboard
+  const handleCopyContacts = (finalizedVolunteers: Applicant[]) => {
+    if (finalizedVolunteers.length === 0) {
+      alert('No finalized volunteers yet.')
+      return
+    }
+    const phones = finalizedVolunteers.map(v => v.phone).filter(Boolean).join(', ')
+    const emails = finalizedVolunteers.map(v => v.email).filter(Boolean).join(', ')
+    const textToCopy = `FINAL VOLUNTEER CONTACT LIST:\nPhones: ${phones}\nEmails: ${emails}`
+    navigator.clipboard.writeText(textToCopy)
+    alert(`Copied ${finalizedVolunteers.length} finalized volunteer contacts to clipboard!`)
+  }
+
   return (
-    <div className="space-y-8">
+    <div suppressHydrationWarning className="space-y-8">
       {/* Organization Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         
@@ -940,7 +1161,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
       {/* ============================================================ */}
       {showAllDrivesModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/60 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 max-w-4xl w-full shadow-2xl border border-gray-100 dark:border-gray-800 max-h-[92vh] flex flex-col">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 max-w-5xl w-full shadow-2xl border border-gray-100 dark:border-gray-800 max-h-[92vh] flex flex-col">
             
             {/* Modal Top Header */}
             <div className="flex items-start justify-between pb-4 border-b border-gray-100 dark:border-gray-800">
@@ -1021,7 +1242,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
             </div>
 
             {/* Drives List Grid */}
-            <div className="flex-1 overflow-y-auto py-4 pr-1 space-y-3.5 max-h-[54vh]">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden py-4 pr-1 space-y-3.5 max-h-[60vh]">
               {filteredDrives.length === 0 ? (
                 <div className="text-center py-12 px-4 bg-gray-50 dark:bg-gray-800/40 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700">
                   {driveBucketTab === 'active' ? (
@@ -1058,7 +1279,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                     <div
                       key={drive.id}
                       onClick={() => setInspectingDrive(drive)}
-                      className={`p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 group ${
+                      className={`p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer flex flex-col gap-3.5 group ${
                         drive.isCancelled
                           ? 'border-rose-200 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/20 hover:border-rose-400'
                           : drive.isCompleted
@@ -1066,88 +1287,102 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                           : 'border-gray-200/80 dark:border-gray-700/80 bg-white dark:bg-gray-800/70 hover:border-emerald-500 shadow-xs hover:shadow-md'
                       }`}
                     >
-                      <div className="space-y-2 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
-                            {drive.category}
-                          </span>
-                          {drive.isCompleted && (
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-extrabold flex items-center gap-1 shadow-xs">
-                              <CheckCircle2 className="w-2.5 h-2.5" />
-                              <span>Completed Event</span>
+                      {/* TOP SECTION: Drive details on left, capacity/registered stats on right */}
+                      <div className="flex flex-col md:flex-row md:items-start justify-between gap-3">
+                        {/* Left Details */}
+                        <div className="space-y-1.5 flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                              {drive.category}
                             </span>
-                          )}
-                          {drive.isCancelled && (
-                            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-extrabold flex items-center gap-1">
-                              <Ban className="w-2.5 h-2.5" />
-                              <span>Cancelled Event</span>
+                            {drive.isCompleted && (
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-extrabold flex items-center gap-1 shadow-xs">
+                                <CheckCircle2 className="w-2.5 h-2.5" />
+                                <span>Completed Event</span>
+                              </span>
+                            )}
+                            {drive.isApplicationsClosed && !drive.isCancelled && !drive.isCompleted && (
+                              <span className="px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 text-[10px] font-extrabold flex items-center gap-1 border border-indigo-200 dark:border-indigo-800">
+                                <Lock className="w-2.5 h-2.5" />
+                                <span>Applications Closed</span>
+                              </span>
+                            )}
+                            {drive.isCancelled && (
+                              <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-extrabold flex items-center gap-1">
+                                <Ban className="w-2.5 h-2.5" />
+                                <span>Cancelled Event</span>
+                              </span>
+                            )}
+                            <span className="text-xs text-gray-500 dark:text-gray-400 font-medium flex items-center gap-1">
+                              <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                              {drive.date} • {drive.time}
                             </span>
-                          )}
-                          <span className="text-xs text-gray-500 dark:text-gray-400 font-medium flex items-center gap-1">
-                            <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                            {drive.date} • {drive.time}
-                          </span>
-                        </div>
-
-                        <h4 className="text-base font-extrabold text-gray-900 dark:text-white m-0 group-hover:text-emerald-600 transition-colors">
-                          {drive.title}
-                        </h4>
-
-                        {drive.isCancelled && drive.cancelReason && (
-                          <div className="p-2 rounded-xl bg-rose-100/70 dark:bg-rose-950/60 text-xs text-rose-900 dark:text-rose-200 flex items-center gap-1.5 font-medium">
-                            <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                            <span><strong>Reason:</strong> {drive.cancelReason}</span>
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600 dark:text-gray-300 pt-1">
-                          <div className="flex items-center gap-1.5 truncate">
-                            <UserCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                            <span className="truncate">In-Charge: <strong>{drive.managerName || 'Coordinator'}</strong> ({drive.managerPhone || 'N/A'})</span>
                           </div>
 
-                          <div className="flex items-center gap-1.5 truncate">
-                            <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            <span className="truncate">{drive.address || drive.location}</span>
-                          </div>
-                        </div>
+                          <h4 className="text-base sm:text-lg font-black text-gray-900 dark:text-white m-0 tracking-tight group-hover:text-emerald-600 transition-colors">
+                            {drive.title}
+                          </h4>
 
-                        {!drive.isCancelled && (
-                          <div className="pt-1 max-w-md">
-                            <div className="flex items-center justify-between text-[11px] font-semibold mb-1">
-                              <span className="text-gray-600 dark:text-gray-400">
-                                {drive.alreadyRegistered ?? 0} / {totalReq} Registered
-                              </span>
-                              <span className="font-extrabold text-emerald-600 dark:text-emerald-400">
-                                {drive.spotsLeft} spots left
-                              </span>
+                          {drive.isCancelled && drive.cancelReason && (
+                            <div className="p-2 rounded-xl bg-rose-100/70 dark:bg-rose-950/60 text-xs text-rose-900 dark:text-rose-200 flex items-center gap-1.5 font-medium">
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                              <span><strong>Reason:</strong> {drive.cancelReason}</span>
                             </div>
-                            <div className="w-full bg-gray-200 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-emerald-500 rounded-full"
-                                style={{ width: `${percentFilled}%` }}
-                              />
+                          )}
+
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-300 pt-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <UserCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                              <span>In-Charge: <strong>{drive.managerName || 'Coordinator'}</strong> ({drive.managerPhone || 'N/A'})</span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>{drive.address || drive.location}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right Capacity / Stats Block */}
+                        {!drive.isCancelled && (
+                          <div className="w-full sm:w-64 shrink-0 flex flex-col gap-1.5 sm:items-end justify-center">
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-100 dark:border-indigo-900/50 flex items-center gap-1">
+                                <Users className="w-3.5 h-3.5" />
+                                <span>{evAccepted} Confirmed</span>
+                              </span>
+                              {evPending > 0 && (
+                                <span className="px-2 py-1 rounded-xl bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold text-[11px]">
+                                  {evPending} New
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="w-full">
+                              <div className="flex items-center justify-between text-[11px] font-semibold mb-1">
+                                <span className="text-gray-600 dark:text-gray-400">
+                                  {drive.alreadyRegistered ?? 0} / {totalReq} Registered
+                                </span>
+                                <span className={`font-extrabold ${drive.spotsLeft === 0 ? 'text-rose-600' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                                  {drive.spotsLeft === 0 ? '0 spots left (Full)' : `${drive.spotsLeft} spot${drive.spotsLeft !== 1 ? 's' : ''} left`}
+                                </span>
+                              </div>
+                              <div className="w-full bg-gray-200 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-300 ${percentFilled >= 100 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                                  style={{ width: `${percentFilled}%` }}
+                                />
+                              </div>
                             </div>
                           </div>
                         )}
                       </div>
 
-                      {/* Right Action Buttons */}
-                      <div className="flex sm:flex-row md:flex-col items-start sm:items-center md:items-end justify-between md:justify-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-gray-100 dark:border-gray-700/60 shrink-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-100 dark:border-indigo-900/50 flex items-center gap-1">
-                            <Users className="w-3.5 h-3.5" />
-                            <span>{evAccepted} Present / Approved</span>
-                          </span>
-                          {evPending > 0 && (
-                            <span className="px-2 py-1 rounded-xl bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold text-[11px]">
-                              {evPending} New
-                            </span>
-                          )}
-                        </div>
-
+                      {/* BOTTOM ACTION BAR: Separate row for buttons so nothing is squished */}
+                      <div className="pt-3 border-t border-gray-100 dark:border-gray-800/80 flex flex-wrap items-center justify-between gap-2.5">
+                        {/* Left Action Buttons */}
                         <div className="flex items-center gap-2 flex-wrap">
-                          {/* Mark as Completed Button / Permanent Completed Badge */}
+                          {/* Mark Completed Button */}
                           {drive.isCompleted ? (
                             <span className="px-3 py-1.5 rounded-xl font-extrabold text-xs bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1.5 shadow-2xs">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
@@ -1160,7 +1395,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                                 e.stopPropagation()
                                 setConfirmCompleteDrive(drive)
                               }}
-                              className="px-3 py-1.5 rounded-xl font-bold text-xs border border-emerald-200 dark:border-emerald-800 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 hover:bg-emerald-600 hover:text-white transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                              className="px-3 py-1.5 rounded-xl font-bold text-xs border border-emerald-200 dark:border-emerald-800 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 hover:bg-emerald-600 hover:text-white transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
                               title="Mark Drive as Completed"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" />
@@ -1168,19 +1403,53 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                             </button>
                           ) : null}
 
+                          {/* Stop Applications / Final Roster Button */}
+                          {!drive.isCancelled && !drive.isCompleted && (
+                            drive.isApplicationsClosed ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setInspectingDrive(drive)
+                                  setCandidateFilter('accepted')
+                                }}
+                                className="px-3 py-1.5 rounded-xl font-extrabold text-xs border border-indigo-200 dark:border-indigo-800 bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 hover:bg-indigo-600 hover:text-white transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                                title="Applications permanently closed - View finalized volunteer roster"
+                              >
+                                <Lock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                                <span>Final Roster ({evAccepted})</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setConfirmCloseAppsDrive(drive)
+                                }}
+                                className="px-3 py-1.5 rounded-xl font-bold text-xs border border-gray-200 dark:border-gray-700 bg-gray-50 text-gray-700 dark:bg-gray-800 dark:text-gray-300 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-300 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                                title="Permanently stop accepting applications and finalize volunteer team"
+                              >
+                                <Lock className="w-3.5 h-3.5" />
+                                <span>Stop Applications</span>
+                              </button>
+                            )
+                          )}
+
+                          {/* Edit Contact Button */}
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation()
                               handleOpenEditContact(drive)
                             }}
-                            className="px-3 py-2 rounded-xl bg-gray-100 hover:bg-indigo-600 text-gray-700 hover:text-white dark:bg-gray-800 dark:text-gray-200 font-bold text-xs border border-gray-200 dark:border-gray-700 transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                            className="px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-indigo-600 text-gray-700 hover:text-white dark:bg-gray-800 dark:text-gray-200 font-bold text-xs border border-gray-200 dark:border-gray-700 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
                             title="Edit In-Charge and Venue Details"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                             <span>Edit Contact</span>
                           </button>
 
+                          {/* Cancel / Restore Button */}
                           {drive.isCancelled ? (
                             <button
                               type="button"
@@ -1188,7 +1457,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                                 e.stopPropagation()
                                 handleRestoreDrive(drive.id)
                               }}
-                              className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-600 text-amber-700 hover:text-white dark:bg-amber-950 dark:text-amber-300 font-bold text-xs border border-amber-200 dark:border-amber-800 transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                              className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-600 text-amber-700 hover:text-white dark:bg-amber-950 dark:text-amber-300 font-bold text-xs border border-amber-200 dark:border-amber-800 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
                             >
                               <RotateCcw className="w-3.5 h-3.5" />
                               <span>Restore</span>
@@ -1200,23 +1469,28 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                                 e.stopPropagation()
                                 setCancellingDrive(drive)
                               }}
-                              className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white dark:bg-rose-950 dark:text-rose-300 font-bold text-xs border border-rose-200 dark:border-rose-800 transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                              className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white dark:bg-rose-950 dark:text-rose-300 font-bold text-xs border border-rose-200 dark:border-rose-800 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
                               title="Cancel Drive and move to Cancelled Bucket"
                             >
                               <Ban className="w-3.5 h-3.5" />
                               <span>Cancel</span>
                             </button>
                           )}
-
-                          <button
-                            type="button"
-                            className="px-4 py-2 rounded-xl bg-emerald-600 group-hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all border-none cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>Inspect Candidates</span>
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </button>
                         </div>
+
+                        {/* Right: Inspect Candidates Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setInspectingDrive(drive)
+                          }}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-xs transition-all border-none cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Inspect Candidates ({evCandidates.length})</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   )
@@ -1277,7 +1551,29 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                 </h3>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {!inspectingDrive.isCompleted && !inspectingDrive.isCancelled && (
+                  inspectingDrive.isApplicationsClosed ? (
+                    <span
+                      className="px-3.5 py-1.5 rounded-xl bg-indigo-100 dark:bg-indigo-950/80 text-indigo-800 dark:text-indigo-300 font-extrabold text-xs border border-indigo-200 dark:border-indigo-800 flex items-center gap-1.5 shadow-2xs"
+                      title="Applications permanently closed - Roster finalized"
+                    >
+                      <Lock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>Applications Closed • Roster Locked</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmCloseAppsDrive(inspectingDrive)}
+                      className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs border-none cursor-pointer flex items-center gap-1.5 shadow-xs transition-all"
+                      title="Permanently stop accepting applications and finalize volunteer team"
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Stop Accepting Applications</span>
+                    </button>
+                  )
+                )}
+
                 {!inspectingDrive.isCompleted && !inspectingDrive.isCancelled && (
                   <button
                     type="button"
@@ -1321,6 +1617,46 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                   <p className="m-0 mt-0.5 text-[11px] text-rose-700 dark:text-rose-300">
                     Reason: {inspectingDrive.cancelReason || 'Schedule conflict'}
                   </p>
+                </div>
+              </div>
+            )}
+
+            {/* Applications Closed & Final Roster Banner with Export / Print actions */}
+            {inspectingDrive.isApplicationsClosed && !inspectingDrive.isCancelled && (
+              <div className="my-2.5 p-3.5 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/70 text-xs text-indigo-950 dark:text-indigo-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-black text-sm">
+                      <span>Applications Closed • Final Roster Finalized</span>
+                    </div>
+                    <p className="m-0 mt-0.5 text-[11px] text-indigo-700 dark:text-indigo-300">
+                      New applications are frozen. Below is the final verified team of {acceptedCandidatesCount} volunteer(s).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap self-start sm:self-center">
+                  <button
+                    type="button"
+                    onClick={() => handleExportCsv(inspectingDrive.title, driveCandidates.filter((c) => c.status === 'accepted'))}
+                    className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-800 hover:bg-indigo-50 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-200 dark:border-indigo-800 cursor-pointer flex items-center gap-1.5 shadow-2xs transition-all"
+                    title="Export finalized volunteers as CSV for Excel / Google Sheets"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Export CSV</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePrintRoster(inspectingDrive, driveCandidates.filter((c) => c.status === 'accepted'))}
+                    className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-800 hover:bg-indigo-50 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-200 dark:border-indigo-800 cursor-pointer flex items-center gap-1.5 shadow-2xs transition-all"
+                    title="Print attendance check-in sheet for event day"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print Roster</span>
+                  </button>
                 </div>
               </div>
             )}
@@ -1407,8 +1743,13 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
             <div className="py-2.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 border-y border-gray-100 dark:border-gray-800">
               <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
                 {[
+                  ...(inspectingDrive.isApplicationsClosed
+                    ? [{ key: 'accepted', label: `⭐ Finalized Roster (${acceptedCandidatesCount})` }]
+                    : []),
                   { key: 'all', label: `All Candidates (${driveCandidates.length})` },
-                  { key: 'accepted', label: `Present / Approved (${acceptedCandidatesCount})` },
+                  ...(!inspectingDrive.isApplicationsClosed
+                    ? [{ key: 'accepted', label: `Present / Approved (${acceptedCandidatesCount})` }]
+                    : []),
                   { key: 'pending', label: `Pending (${pendingCandidatesCount})` },
                   { key: 'declined', label: `Declined (${declinedCandidatesCount})` },
                 ].map((tab) => (
@@ -1534,36 +1875,38 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                         )}
                       </div>
 
-                      {/* Tick & Cross Actions */}
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          disabled={cand.status === 'accepted'}
-                          onClick={() => handleCandidateStatus(cand.id, 'accepted')}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border-none flex items-center gap-1 ${
-                            cand.status === 'accepted'
-                              ? 'bg-emerald-600 text-white shadow-md opacity-75 cursor-not-allowed'
-                              : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white dark:bg-emerald-950 dark:text-emerald-300 cursor-pointer'
-                          }`}
-                        >
-                          <Check className="w-3.5 h-3.5 stroke-[3]" />
-                          <span>{cand.status === 'accepted' ? 'Approved ✔' : 'Approve'}</span>
-                        </button>
+                      {/* Tick & Cross Actions — only shown in All/Pending/Declined review tabs, hidden in Final Roster */}
+                      {candidateFilter !== 'accepted' && (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            disabled={cand.status === 'accepted'}
+                            onClick={() => handleCandidateStatus(cand.id, 'accepted')}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border-none flex items-center gap-1 ${
+                              cand.status === 'accepted'
+                                ? 'bg-emerald-600 text-white shadow-md opacity-75 cursor-not-allowed'
+                                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white dark:bg-emerald-950 dark:text-emerald-300 cursor-pointer'
+                            }`}
+                          >
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                            <span>{cand.status === 'accepted' ? 'Approved ✔' : 'Approve'}</span>
+                          </button>
 
-                        <button
-                          type="button"
-                          disabled={cand.status === 'declined'}
-                          onClick={() => handleCandidateStatus(cand.id, 'declined')}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border-none flex items-center gap-1 ${
-                            cand.status === 'declined'
-                              ? 'bg-rose-600 text-white shadow-md opacity-75 cursor-not-allowed'
-                              : 'bg-rose-50 text-rose-700 hover:bg-rose-600 hover:text-white dark:bg-rose-950 dark:text-rose-300 cursor-pointer'
-                          }`}
-                        >
-                          <X className="w-3.5 h-3.5 stroke-[3]" />
-                          <span>{cand.status === 'declined' ? 'Declined ✖' : 'Decline'}</span>
-                        </button>
-                      </div>
+                          <button
+                            type="button"
+                            disabled={cand.status === 'declined'}
+                            onClick={() => handleCandidateStatus(cand.id, 'declined')}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border-none flex items-center gap-1 ${
+                              cand.status === 'declined'
+                                ? 'bg-rose-600 text-white shadow-md opacity-75 cursor-not-allowed'
+                                : 'bg-rose-50 text-rose-700 hover:bg-rose-600 hover:text-white dark:bg-rose-950 dark:text-rose-300 cursor-pointer'
+                            }`}
+                          >
+                            <X className="w-3.5 h-3.5 stroke-[3]" />
+                            <span>{cand.status === 'declined' ? 'Declined ✖' : 'Decline'}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )
                 })
@@ -1875,6 +2218,78 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>Yes, Confirm Completion</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Stop Accepting Applications & Lock Final Roster Modal */}
+      {confirmCloseAppsDrive && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 max-w-md w-full shadow-2xl border border-gray-100 dark:border-gray-800 space-y-4">
+            
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-2xl shrink-0">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-gray-900 dark:text-white m-0">
+                  Permanently Stop Applications?
+                </h3>
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                  {confirmCloseAppsDrive.title}
+                </span>
+              </div>
+            </div>
+
+            {/* Explanation Box */}
+            <div className="p-3.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/50 text-xs text-indigo-900 dark:text-indigo-200 space-y-1.5">
+              <div className="font-extrabold flex items-center gap-1.5 text-indigo-800 dark:text-indigo-300">
+                <span>Permanent Action: Finalizing Volunteer Roster</span>
+              </div>
+              <p className="m-0 text-[11px] text-indigo-800/90 dark:text-indigo-300/90 leading-relaxed">
+                Stopping applications will permanently close this drive to any new registrations. Your confirmed volunteer roster will be locked so you can print attendance check-in sheets and export verified contacts.
+              </p>
+            </div>
+
+            {/* Current Counts Summary */}
+            <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 space-y-1 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Approved Volunteers (Final Team):</span>
+                <strong className="text-emerald-600 dark:text-emerald-400">
+                  {applicants.filter((a) => a.eventId === confirmCloseAppsDrive.id && a.status === 'accepted').length} Confirmed
+                </strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Pending Applications:</span>
+                <strong className="text-amber-600 dark:text-amber-400">
+                  {applicants.filter((a) => a.eventId === confirmCloseAppsDrive.id && a.status === 'pending').length} Pending
+                </strong>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-gray-100 dark:border-gray-800">
+              <button
+                type="button"
+                onClick={() => setConfirmCloseAppsDrive(null)}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border-none bg-transparent cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const drive = confirmCloseAppsDrive
+                  setConfirmCloseAppsDrive(null)
+                  handleToggleApplications(drive.id, true)
+                }}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs shadow-md border-none cursor-pointer flex items-center gap-1.5 transition-all"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Yes, Permanently Stop Applications</span>
               </button>
             </div>
 

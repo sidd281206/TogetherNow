@@ -213,6 +213,7 @@ export async function verifyEmailOtpAction(email: string, otp: string): Promise<
 }
 
 export interface SaveProfileInput {
+  fullName?: string
   phone: string
   address: string
   city: string
@@ -244,6 +245,7 @@ export async function saveCompleteUserProfileAction(input: SaveProfileInput): Pr
 
     const parsedSkills = input.skills && input.skills.length > 0 ? input.skills : ['Teamwork', 'Communication', 'Community Support']
     const parsedInterests = input.interests && input.interests.length > 0 ? input.interests : ['Community Support', 'Environment']
+    const resolvedFullName = input.fullName?.trim() || user.user_metadata?.full_name || 'Volunteer'
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -255,6 +257,7 @@ export async function saveCompleteUserProfileAction(input: SaveProfileInput): Pr
         email_confirm: true,
         user_metadata: {
           ...user.user_metadata,
+          full_name: resolvedFullName,
           phone: input.phone.trim(),
           address: fullAddress,
           city: input.city.trim(),
@@ -276,6 +279,7 @@ export async function saveCompleteUserProfileAction(input: SaveProfileInput): Pr
     try {
       await adminClient.from('profiles').upsert({
         id: user.id,
+        full_name: resolvedFullName,
         phone: input.phone.trim(),
         address: fullAddress,
         city: input.city.trim(),

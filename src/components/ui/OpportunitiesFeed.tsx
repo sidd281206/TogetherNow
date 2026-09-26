@@ -35,7 +35,10 @@ import {
   Lock,
   ShieldAlert,
   ShieldCheck,
-  Star
+  Star,
+  Download,
+  Printer,
+  Copy
 } from 'lucide-react'
 import { 
   createOpportunityAction, 
@@ -43,13 +46,15 @@ import {
   submitVolunteerApplicationAction, 
   updateApplicantStatusAction,
   cancelOpportunityAction,
-  markOpportunityCompletedAction
+  markOpportunityCompletedAction,
+  toggleApplicationsAction
 } from '@/app/actions/opportunities'
 import { pushNotification } from '@/lib/notifications'
 import ProfileCompletionModal from './ProfileCompletionModal'
 import OrganizationAboutModal from '@/components/ui/OrganizationAboutModal'
 import { getOrgRatingSummary } from '@/lib/ratings'
 import { createClient } from '@/lib/supabase/client'
+import { VolunteerPreferences, scoreOpportunity, ScoredOpportunity } from '@/lib/recommendations'
 
 export interface Opportunity {
   id: string
@@ -79,6 +84,8 @@ export interface Opportunity {
   cancelReason?: string
   isCompleted?: boolean
   completedAt?: string
+  isApplicationsClosed?: boolean
+  applicationsClosedAt?: string
 }
 
 export interface Applicant {
@@ -231,11 +238,52 @@ export const INITIAL_OPPORTUNITIES: Opportunity[] = [
     skillsNeeded: ['Gardening', 'Outdoors', 'Teamwork'],
     description: 'Help plant over 200 native tree saplings to increase urban shade and fight local heat islands.',
   },
+  {
+    id: '6',
+    title: 'Wildlife & Community Drive Event Photographer',
+    organization: 'Prithvi Conservation & Wildlife Trust',
+    isVerifiedOrg: true,
+    orgStatus: 'approved',
+    category: 'Environment',
+    location: 'Sanjay Gandhi National Park & Bandra Coastal Track, Mumbai',
+    address: 'Nature Information Center, SGNP Gate, Borivali East, Mumbai 400066',
+    managerName: 'Rohan Kothari',
+    managerPhone: '+91 98331 55678',
+    isRemote: false,
+    date: 'Sat, Aug 29, 2026',
+    time: '07:00 AM - 11:30 AM',
+    spotsLeft: 5,
+    totalRequired: 8,
+    alreadyRegistered: 3,
+    skillsNeeded: ['Photography', 'Photo Editing', 'Visual Storytelling'],
+    description: 'Capture high-impact photos and visual stories of our wildlife rescue initiatives, bird sanctuary trails, and volunteer cleanups across Mumbai for national awareness campaigns.',
+  },
+  {
+    id: '7',
+    title: 'Community Storytelling & Photography Volunteer',
+    organization: 'Asha Creative Arts Foundation',
+    isVerifiedOrg: true,
+    orgStatus: 'approved',
+    category: 'Community',
+    location: 'Dharavi Community Arts Center, Mumbai',
+    address: '90 Feet Road, Near Kala Kunj, Dharavi, Mumbai 400017',
+    managerName: 'Sneha Joshi',
+    managerPhone: '+91 98205 11223',
+    isRemote: false,
+    date: 'Sun, Sep 06, 2026',
+    time: '10:30 AM - 02:30 PM',
+    spotsLeft: 6,
+    totalRequired: 10,
+    alreadyRegistered: 4,
+    skillsNeeded: ['Photography', 'Mentorship', 'Creative Arts'],
+    description: 'Lead hands-on photography mentoring with aspiring youth and document grassroots community empowerment stories for public exhibitions.',
+  },
 ]
 
 export interface OpportunitiesFeedRef {
   focusSearch: () => void
   openCreateModal: () => void
+  filterToRecommended?: () => void
 }
 
 interface OpportunitiesFeedProps {
@@ -249,6 +297,7 @@ interface OpportunitiesFeedProps {
     role: string
     missingFields?: string[]
   }
+  volunteerPreferences?: VolunteerPreferences
 }
 
 const CATEGORIES = ['All', 'Environment', 'Education', 'Health', 'Community', 'Tech', 'Remote']
@@ -330,13 +379,52 @@ const INITIAL_APPLICANTS: Applicant[] = [
 ]
 
 const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProps>(
-  ({ userRole = 'volunteer', organizationName, userId, userEmail = 'volunteer@togethernow.org', userProfileStatus }, ref) => {
+  ({ userRole = 'volunteer', organizationName, userId, userEmail = 'volunteer@togethernow.org', userProfileStatus, volunteerPreferences }, ref) => {
     const isCurrentUserApplicant = (a: Applicant) => {
       if (userId && a.volunteerId && a.volunteerId === userId) return true
       if (userEmail && a.email && a.email.trim().toLowerCase() === userEmail.trim().toLowerCase()) return true
       if (userEmail && a.volunteerId && a.volunteerId.trim().toLowerCase() === userEmail.trim().toLowerCase()) return true
       return false
     }
+
+    const [preferences, setPreferences] = useState<VolunteerPreferences>(() => {
+      if (volunteerPreferences && (volunteerPreferences.skills.length > 0 || volunteerPreferences.interests.length > 0 || volunteerPreferences.city)) {
+        return volunteerPreferences
+      }
+      try {
+        const userScope = userId || userEmail
+        const s = localStorage.getItem(`togethernow_volunteer_skills_${userScope}`) || localStorage.getItem(`togethernow_volunteer_skills_${userEmail}`)
+        const i = localStorage.getItem(`togethernow_volunteer_interests_${userScope}`) || localStorage.getItem(`togethernow_volunteer_interests_${userEmail}`)
+        const c = localStorage.getItem(`togethernow_volunteer_city_${userScope}`) || localStorage.getItem(`togethernow_volunteer_city_${userEmail}`)
+        return {
+          skills: s ? JSON.parse(s) : [],
+          interests: i ? JSON.parse(i) : [],
+          city: c || '',
+        }
+      } catch {
+        return { skills: [], interests: [], city: '' }
+      }
+    })
+
+    useEffect(() => {
+      if (volunteerPreferences) {
+        setPreferences(volunteerPreferences)
+      }
+    }, [volunteerPreferences])
+
+    useEffect(() => {
+      const handleProfileUpdate = (e: any) => {
+        if (e?.detail) {
+          setPreferences((prev) => ({
+            skills: e.detail.skills || prev.skills,
+            interests: e.detail.interests || prev.interests,
+            city: e.detail.city || prev.city,
+          }))
+        }
+      }
+      window.addEventListener('togethernow_profile_completed', handleProfileUpdate)
+      return () => window.removeEventListener('togethernow_profile_completed', handleProfileUpdate)
+    }, [])
 
     const [opportunities, setOpportunities] = useState<Opportunity[]>(INITIAL_OPPORTUNITIES)
     const [searchQuery, setSearchQuery] = useState('')
@@ -368,6 +456,21 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
     const [volunteerApplySkills, setVolunteerApplySkills] = useState('')
 
     const searchInputRef = useRef<HTMLInputElement>(null)
+
+    useImperativeHandle(ref, () => ({
+      focusSearch: () => {
+        searchInputRef.current?.focus()
+        searchInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      },
+      openCreateModal: () => {
+        setShowCreateModal(true)
+      },
+      filterToRecommended: () => {
+        setSelectedCategory('🎯 Recommended')
+        const el = document.getElementById('opportunities-feed')
+        el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      },
+    }))
 
     // Form state for creating new opportunity
     const [newTitle, setNewTitle] = useState('')
@@ -427,6 +530,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         try {
           const dbOps = await fetchOpportunitiesAction()
           if (dbOps && dbOps.length > 0) {
+            let mergedOps: Opportunity[] | null = null
             setOpportunities((prev) => {
               const idMap = new Map<string, Opportunity>()
               prev.forEach((op) => idMap.set(op.id, op))
@@ -434,9 +538,16 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
               dbOps.forEach((dbOp) => {
                 const existing = idMap.get(dbOp.id)
                 if (existing) {
+                  const isClosed = Boolean(dbOp.isApplicationsClosed || existing.isApplicationsClosed)
                   idMap.set(dbOp.id, {
                     ...existing,
                     ...dbOp,
+                    isApplicationsClosed: isClosed,
+                    applicationsClosedAt: dbOp.applicationsClosedAt || existing.applicationsClosedAt,
+                    isCompleted: Boolean(dbOp.isCompleted || existing.isCompleted),
+                    completedAt: dbOp.completedAt || existing.completedAt,
+                    isCancelled: Boolean(dbOp.isCancelled || existing.isCancelled),
+                    cancelledAt: dbOp.cancelledAt || existing.cancelledAt,
                     date: (dbOp.date && dbOp.date !== 'Upcoming') ? dbOp.date : (existing.date || dbOp.date || 'Upcoming'),
                     time: (dbOp.time && dbOp.time !== 'Flexible' && dbOp.time !== 'To be scheduled') ? dbOp.time : (existing.time || dbOp.time || '09:00 AM - 01:00 PM'),
                     address: (dbOp.address && dbOp.address !== 'Local Community Center' && dbOp.address !== 'Remote') ? dbOp.address : (existing.address || dbOp.address || existing.location),
@@ -449,12 +560,18 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                 }
               })
               const merged = Array.from(idMap.values())
-              try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
-                window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: merged }))
-              } catch {}
+              mergedOps = merged
               return merged
             })
+
+            if (mergedOps) {
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedOps))
+                setTimeout(() => {
+                  window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: mergedOps }))
+                }, 0)
+              } catch {}
+            }
           }
         } catch (err) {
           console.warn('Error fetching opportunities from DB:', err)
@@ -463,25 +580,27 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       loadDbOps()
 
       const handleStorageUpdate = (e?: any) => {
-        try {
-          if (e?.detail && Array.isArray(e.detail)) {
-            setOpportunities(e.detail)
-          } else {
-            const localSaved = localStorage.getItem(STORAGE_KEY)
-            if (localSaved) {
-              const parsedOps: Opportunity[] = JSON.parse(localSaved)
-              if (Array.isArray(parsedOps) && parsedOps.length > 0) {
-                setOpportunities(parsedOps)
+        setTimeout(() => {
+          try {
+            if (e?.detail && Array.isArray(e.detail)) {
+              setOpportunities(e.detail)
+            } else {
+              const localSaved = localStorage.getItem(STORAGE_KEY)
+              if (localSaved) {
+                const parsedOps: Opportunity[] = JSON.parse(localSaved)
+                if (Array.isArray(parsedOps) && parsedOps.length > 0) {
+                  setOpportunities(parsedOps)
+                }
               }
             }
-          }
 
-          const localApps = localStorage.getItem(APPLICANTS_STORAGE_KEY)
-          if (localApps) {
-            const parsedApps: Applicant[] = JSON.parse(localApps)
-            if (Array.isArray(parsedApps)) setApplicants(parsedApps)
-          }
-        } catch {}
+            const localApps = localStorage.getItem(APPLICANTS_STORAGE_KEY)
+            if (localApps) {
+              const parsedApps: Applicant[] = JSON.parse(localApps)
+              if (Array.isArray(parsedApps)) setApplicants(parsedApps)
+            }
+          } catch {}
+        }, 0)
       }
 
       const handleFocusSync = () => {
@@ -587,6 +706,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         const newSpots = Math.max(0, totalReq - newReg)
 
         // 2. Update opportunities spots (pure updater — dispatch event OUTSIDE)
+        let updatedList: Opportunity[] | null = null
         setOpportunities((prev) => {
           const updated = prev.map((o) => {
             if (o.id !== ev.id) return o
@@ -596,15 +716,18 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
               spotsLeft: newSpots,
             }
           })
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-            // Defer the event dispatch so it doesn't fire inside a state updater
-            queueMicrotask(() => {
-              window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
-            })
-          } catch {}
+          updatedList = updated
           return updated
         })
+
+        if (updatedList) {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList))
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updatedList }))
+            }, 0)
+          } catch {}
+        }
 
         // 3. Update managing event spots (pure updater)
         setManagingEvent((prevEv) => {
@@ -678,18 +801,25 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       const evTitle = cancellingEvent.title
 
       // Update state
+      let updatedOps: Opportunity[] | null = null
       setOpportunities((prev) => {
         const updated = prev.map((op) =>
           op.id === evId
             ? { ...op, isCancelled: true, cancelledAt: cancelledTime, cancelReason: reason }
             : op
         )
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
-        } catch {}
+        updatedOps = updated
         return updated
       })
+
+      if (updatedOps) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedOps))
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updatedOps }))
+          }, 0)
+        } catch {}
+      }
 
       // Notify enrolled / applied volunteers
       const enrolled = applicants.filter((a) => a.eventId === evId)
@@ -732,18 +862,25 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
 
     // Handle Restore Event
     const handleRestoreEvent = (eventId: string) => {
+      let updatedOps: Opportunity[] | null = null
       setOpportunities((prev) => {
         const updated = prev.map((op) =>
           op.id === eventId
             ? { ...op, isCancelled: false, cancelledAt: undefined, cancelReason: undefined }
             : op
         )
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
-        } catch {}
+        updatedOps = updated
         return updated
       })
+
+      if (updatedOps) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedOps))
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updatedOps }))
+          }, 0)
+        } catch {}
+      }
 
       pushNotification({
         targetRole: 'organization',
@@ -762,18 +899,25 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
     const executeCompleteEvent = (event: Opportunity) => {
       const completedTime = new Date().toISOString()
 
+      let updatedOps: Opportunity[] | null = null
       setOpportunities((prev) => {
         const updated = prev.map((op) =>
           op.id === event.id
             ? { ...op, isCompleted: true, completedAt: completedTime }
             : op
         )
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-          window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
-        } catch {}
+        updatedOps = updated
         return updated
       })
+
+      if (updatedOps) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedOps))
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updatedOps }))
+          }, 0)
+        } catch {}
+      }
 
       // Notify accepted candidates
       const enrolled = applicants.filter((a) => a.eventId === event.id && a.status === 'accepted')
@@ -818,6 +962,185 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       setConfirmCompleteEvent(null)
     }
 
+    // Stop / Re-open Accepting Applications
+    const handleToggleApplications = async (eventId: string, isClosed: boolean) => {
+      const closedTime = isClosed ? new Date().toISOString() : undefined
+
+      let updatedOps: Opportunity[] | null = null
+      setOpportunities((prev) => {
+        const updated = prev.map((o) =>
+          o.id === eventId
+            ? {
+                ...o,
+                isApplicationsClosed: isClosed,
+                applicationsClosedAt: closedTime,
+              }
+            : o
+        )
+        updatedOps = updated
+        return updated
+      })
+
+      if (updatedOps) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedOps))
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updatedOps }))
+          }, 0)
+        } catch {}
+      }
+
+      if (managingEvent?.id === eventId) {
+        setManagingEvent((prev) =>
+          prev
+            ? {
+                ...prev,
+                isApplicationsClosed: isClosed,
+                applicationsClosedAt: closedTime,
+              }
+            : null
+        )
+      }
+
+      if (isClosed) {
+        setApplicantStatusFilter('accepted')
+      }
+
+      try {
+        await toggleApplicationsAction({
+          eventId,
+          isClosed,
+          applicationsClosedAt: closedTime,
+        })
+      } catch (err) {
+        console.warn('Notice updating database toggleApplicationsAction:', err)
+      }
+
+      pushNotification({
+        targetRole: 'organization',
+        type: 'approval',
+        eventId,
+        title: isClosed ? '🔒 Applications Closed' : '🔓 Applications Re-opened',
+        message: isClosed
+          ? 'Applications for this event have been closed and the final volunteer roster is locked.'
+          : 'Applications have been re-opened for this event.',
+      })
+    }
+
+    // Export Finalized Volunteers to CSV
+    const handleExportCsv = (eventTitle: string, finalizedVolunteers: Applicant[]) => {
+      if (finalizedVolunteers.length === 0) {
+        alert('No finalized volunteers to export yet. Approve candidates to build your roster.')
+        return
+      }
+      const headers = ['#', 'Volunteer Name', 'Phone Number', 'Email Address', 'Verified Skills', 'Applied Date', 'Roster Status']
+      const rows = finalizedVolunteers.map((v, idx) => [
+        idx + 1,
+        `"${(v.name || 'Volunteer').replace(/"/g, '""')}"`,
+        `"${(v.phone || 'N/A').replace(/"/g, '""')}"`,
+        `"${(v.email || 'N/A').replace(/"/g, '""')}"`,
+        `"${(v.skills?.join(', ') || 'N/A').replace(/"/g, '""')}"`,
+        `"${(v.appliedAt || 'N/A').replace(/"/g, '""')}"`,
+        `"Finalized / Confirmed"`
+      ])
+      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${eventTitle.replace(/[^a-zA-Z0-9]/g, '_')}_Final_Volunteer_List.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    }
+
+    // Print Finalized Volunteer Attendance Sheet
+    const handlePrintRoster = (op: Opportunity, finalizedVolunteers: Applicant[]) => {
+      if (finalizedVolunteers.length === 0) {
+        alert('No finalized volunteers to print yet.')
+        return
+      }
+      const printWindow = window.open('', '_blank')
+      if (!printWindow) return
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Final Volunteer List - ${op.title}</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 30px; color: #111; line-height: 1.4; }
+              h1 { margin: 0 0 6px 0; font-size: 22px; }
+              .meta { font-size: 13px; color: #555; margin-bottom: 24px; padding-bottom: 12px; border-bottom: 2px solid #e4e4e7; }
+              table { width: 100%; border-collapse: collapse; font-size: 12px; }
+              th, td { border: 1px solid #d4d4d8; padding: 10px 12px; text-align: left; }
+              th { background: #f4f4f5; font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+              tr:nth-child(even) { background: #fafafa; }
+              .check-col { width: 90px; text-align: center; }
+              .sig-col { width: 140px; }
+              @media print {
+                @page { margin: 15mm; }
+              }
+            </style>
+          </head>
+          <body>
+            <h1>${op.title}</h1>
+            <div class="meta">
+              <strong>Organization:</strong> ${op.organization} &nbsp;|&nbsp;
+              <strong>Date:</strong> ${op.date || 'Upcoming'} &nbsp;|&nbsp;
+              <strong>Time:</strong> ${op.time || 'Flexible'} &nbsp;|&nbsp;
+              <strong>Location:</strong> ${op.address || op.location} &nbsp;|&nbsp;
+              <strong>Total Finalized Volunteers:</strong> ${finalizedVolunteers.length}
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 30px;">#</th>
+                  <th>Volunteer Name</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>Skills</th>
+                  <th class="check-col">Present [✓]</th>
+                  <th class="sig-col">Volunteer Signature</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${finalizedVolunteers.map((v, i) => `
+                  <tr>
+                    <td>${i + 1}</td>
+                    <td><strong>${v.name}</strong></td>
+                    <td>${v.phone || 'N/A'}</td>
+                    <td>${v.email || 'N/A'}</td>
+                    <td>${v.skills?.join(', ') || '-'}</td>
+                    <td class="check-col">[ &nbsp;&nbsp; ]</td>
+                    <td class="sig-col"></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            <script>
+              window.onload = function() { window.print(); }
+            </script>
+          </body>
+        </html>
+      `
+      printWindow.document.write(html)
+      printWindow.document.close()
+    }
+
+    // Copy Volunteer Contacts to Clipboard
+    const handleCopyContacts = (finalizedVolunteers: Applicant[]) => {
+      if (finalizedVolunteers.length === 0) {
+        alert('No finalized volunteers yet.')
+        return
+      }
+      const phones = finalizedVolunteers.map(v => v.phone).filter(Boolean).join(', ')
+      const emails = finalizedVolunteers.map(v => v.email).filter(Boolean).join(', ')
+      const textToCopy = `FINAL VOLUNTEER CONTACT LIST:\nPhones: ${phones}\nEmails: ${emails}`
+      navigator.clipboard.writeText(textToCopy)
+      alert(`Copied ${finalizedVolunteers.length} volunteer contacts to clipboard!`)
+    }
+
     const handleOpenCreateModal = () => {
       // Set sensible defaults if empty
       if (!newDate) {
@@ -847,15 +1170,6 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       setShowCreateModal(true)
     }
 
-    useImperativeHandle(ref, () => ({
-      focusSearch: () => {
-        searchInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        searchInputRef.current?.focus()
-      },
-      openCreateModal: () => {
-        handleOpenCreateModal()
-      },
-    }))
 
     const toggleBookmark = (id: string) => {
       setOpportunities((prev) => {
@@ -1129,10 +1443,24 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
           ? true
           : selectedCategory === 'Remote'
           ? op.isRemote
+          : selectedCategory === '🎯 Recommended'
+          ? scoreOpportunity(op, preferences).isRecommended
           : op.category === selectedCategory
 
       return matchesSearch && matchesCategory
     })
+
+    const displayOpportunities = selectedCategory === '🎯 Recommended'
+      ? [...filteredOpportunities].sort((a, b) => {
+          const scoreA = scoreOpportunity(a, preferences).matchScore
+          const scoreB = scoreOpportunity(b, preferences).matchScore
+          return scoreB - scoreA
+        })
+      : filteredOpportunities
+
+    const categoriesList = userRole === 'volunteer'
+      ? ['All', '🎯 Recommended', 'Environment', 'Education', 'Health', 'Community', 'Tech', 'Remote']
+      : ['All', 'Environment', 'Education', 'Health', 'Community', 'Tech', 'Remote']
 
     // Filter applicants strictly for the selected event in the Organization Modal
     const currentEventApplicants = managingEvent
@@ -1169,7 +1497,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
             <h3 className="text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-white tracking-tight m-0 flex items-center gap-2">
               <span>Explore Opportunities & Events</span>
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">
-                {filteredOpportunities.length} Available
+                {displayOpportunities.length} Available
               </span>
             </h3>
             <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 m-0 mt-0.5">
@@ -1218,7 +1546,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
             <span className="text-xs font-semibold text-gray-400 flex items-center gap-1 pr-1 pl-0.5">
               <Filter className="w-3 h-3" /> Filter:
             </span>
-            {CATEGORIES.map((cat) => (
+            {categoriesList.map((cat) => (
               <button
                 key={cat}
                 type="button"
@@ -1236,14 +1564,16 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         </div>
 
         {/* Opportunity Cards Grid */}
-        {filteredOpportunities.length === 0 ? (
+        {displayOpportunities.length === 0 ? (
           <div className="text-center py-12 px-4 bg-white dark:bg-gray-900 rounded-2xl border border-dashed border-gray-200 dark:border-gray-800">
             <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
               <Search className="w-6 h-6" />
             </div>
             <h4 className="text-base font-bold text-gray-900 dark:text-white m-0">No matching opportunities found</h4>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-sm mx-auto">
-              Try searching with different keywords or clearing your category filters.
+              {selectedCategory === '🎯 Recommended'
+                ? 'No opportunities match your current skills or city. Try exploring other categories or updating your interests!'
+                : 'Try searching with different keywords or clearing your category filters.'}
             </p>
             <button
               type="button"
@@ -1258,7 +1588,8 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {filteredOpportunities.map((op) => {
+            {displayOpportunities.map((op) => {
+              const scoredOp = userRole === 'volunteer' ? scoreOpportunity(op, preferences) : null
               const eventApps = applicants.filter((a) => a.eventId === op.id)
               const eventPending = eventApps.filter((a) => a.status === 'pending').length
               const volunteerApp = userRole === 'volunteer'
@@ -1278,6 +1609,8 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                   className={`bg-white dark:bg-gray-900 rounded-2xl border p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between group cursor-pointer ${
                     op.isCancelled
                       ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50/10 dark:bg-rose-950/10'
+                      : scoredOp?.isRecommended
+                      ? 'border-emerald-200/90 dark:border-emerald-800/80 hover:border-emerald-500 ring-1 ring-emerald-500/10'
                       : 'border-gray-100 dark:border-gray-800 hover:border-emerald-300 dark:hover:border-emerald-700'
                   }`}
                 >
@@ -1287,10 +1620,22 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 text-[11px] font-bold border border-emerald-200/50 dark:border-emerald-800/40">
                           {op.category}
                         </span>
+                        {userRole === 'volunteer' && scoredOp?.isRecommended && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-[10px] font-black shadow-xs ring-1 ring-emerald-400/40">
+                            <Sparkles className="w-2.5 h-2.5 animate-pulse" />
+                            <span>{scoredOp.matchPercentage}% Match</span>
+                          </span>
+                        )}
                         {op.isCompleted && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[10px] font-extrabold border border-emerald-300 dark:border-emerald-800/60">
                             <CheckCircle2 className="w-2.5 h-2.5" />
                             <span>Completed</span>
+                          </span>
+                        )}
+                        {op.isApplicationsClosed && !op.isCancelled && !op.isCompleted && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 text-[10px] font-extrabold border border-indigo-200 dark:border-indigo-800">
+                            <Lock className="w-2.5 h-2.5" />
+                            <span>Applications Closed</span>
                           </span>
                         )}
                         {op.isCancelled && (
@@ -1328,6 +1673,26 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                     <h4 className="text-base font-bold text-gray-900 dark:text-white m-0 group-hover:text-emerald-600 transition-colors line-clamp-2">
                       {op.title}
                     </h4>
+
+                    {userRole === 'volunteer' && scoredOp?.isRecommended && scoredOp.matchReasons.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap mt-1.5 mb-1">
+                        {scoredOp.matchReasons.slice(0, 2).map((reason, idx) => (
+                          <span
+                            key={idx}
+                            className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full border ${
+                              reason.type === 'interest'
+                                ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200/60 dark:border-purple-800/60'
+                                : reason.type === 'skill'
+                                ? 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border-teal-200/60 dark:border-teal-800/60'
+                                : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200/60 dark:border-emerald-800/60'
+                            }`}
+                          >
+                            {reason.label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mt-1 mb-3 flex-wrap">
                       <Building2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                       <span className="font-semibold text-gray-700 dark:text-gray-300 truncate">{op.organization}</span>
@@ -1570,6 +1935,11 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                       <div className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-bold text-xs border border-amber-200 dark:border-amber-900/40">
                         <Clock3 className="w-4 h-4 text-amber-600" />
                         <span>Application Under Review ⏳</span>
+                      </div>
+                    ) : op.isApplicationsClosed ? (
+                      <div className="w-full flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-bold text-xs border border-gray-200/80 dark:border-gray-700">
+                        <Lock className="w-3.5 h-3.5 text-gray-500" />
+                        <span>Applications Closed • Roster Finalized</span>
                       </div>
                     ) : op.spotsLeft === 0 ? (
                       <div className="w-full flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-bold text-xs">
@@ -1894,6 +2264,15 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                       )
                     }
 
+                    if (viewingEventModal.isApplicationsClosed) {
+                      return (
+                        <span className="px-4 py-2 rounded-xl text-xs font-bold bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 flex items-center gap-1.5 border border-gray-200 dark:border-gray-700">
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>Applications Closed • Roster Finalized</span>
+                        </span>
+                      )
+                    }
+
                     if (!viewingEventModal.isCancelled && viewingEventModal.spotsLeft > 0) {
                       return (
                         <button
@@ -2023,41 +2402,59 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                 </div>
               </div>
 
-              {/* Event Statistics Summary Pills */}
-              <div className="grid grid-cols-4 gap-2.5 mb-4">
-                <div className="bg-gray-50 dark:bg-gray-800/60 p-2.5 rounded-2xl border border-gray-100 dark:border-gray-800 text-center">
-                  <span className="block text-[10px] text-gray-500 dark:text-gray-400 font-medium">Total Applied</span>
-                  <span className="text-base font-extrabold text-gray-900 dark:text-white">
-                    {currentEventApplicants.length}
-                  </span>
+
+              {/* Applications Closed & Final Roster Banner with Export / Print actions */}
+              {managingEvent.isApplicationsClosed && !managingEvent.isCancelled && (
+                <div className="my-2.5 p-3.5 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/70 text-xs text-indigo-950 dark:text-indigo-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                      <Lock className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-black text-sm">
+                        <span>Applications Closed • Final Roster Finalized</span>
+                      </div>
+                      <p className="m-0 mt-0.5 text-[11px] text-indigo-700 dark:text-indigo-300">
+                        New applications are frozen. Below is the final verified team ready for the event.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap self-start sm:self-center">
+                    <button
+                      type="button"
+                      onClick={() => handleExportCsv(managingEvent.title, currentEventApplicants.filter((c) => c.status === 'accepted'))}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-800 hover:bg-indigo-50 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-200 dark:border-indigo-800 cursor-pointer flex items-center gap-1.5 shadow-2xs transition-all"
+                      title="Export finalized volunteers as CSV for Excel / Google Sheets"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Export CSV</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePrintRoster(managingEvent, currentEventApplicants.filter((c) => c.status === 'accepted'))}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-800 hover:bg-indigo-50 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-200 dark:border-indigo-800 cursor-pointer flex items-center gap-1.5 shadow-2xs transition-all"
+                      title="Print attendance check-in sheet for event day"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>Print Roster</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="bg-amber-50/70 dark:bg-amber-950/40 p-2.5 rounded-2xl border border-amber-100 dark:border-amber-900/40 text-center">
-                  <span className="block text-[10px] text-amber-700 dark:text-amber-400 font-medium">Pending Review</span>
-                  <span className="text-base font-extrabold text-amber-700 dark:text-amber-400">
-                    {pendingCount}
-                  </span>
-                </div>
-                <div className="bg-emerald-50 dark:bg-emerald-950/40 p-2.5 rounded-2xl border border-emerald-100 dark:border-emerald-900/40 text-center">
-                  <span className="block text-[10px] text-emerald-700 dark:text-emerald-400 font-medium">Approved (✔)</span>
-                  <span className="text-base font-extrabold text-emerald-700 dark:text-emerald-400">
-                    {acceptedCount}
-                  </span>
-                </div>
-                <div className="bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-2xl border border-rose-100 dark:border-rose-900/40 text-center">
-                  <span className="block text-[10px] text-rose-700 dark:text-rose-400 font-medium">Declined (✖)</span>
-                  <span className="text-base font-extrabold text-rose-700 dark:text-rose-400">
-                    {declinedCount}
-                  </span>
-                </div>
-              </div>
+              )}
 
               {/* Filter Tabs & Search Bar */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pb-3 border-b border-gray-100 dark:border-gray-800">
                 <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
                   {[
+                    ...(managingEvent.isApplicationsClosed
+                      ? [{ key: 'accepted', label: `⭐ Finalized Roster (${acceptedCount})` }]
+                      : []),
                     { key: 'all', label: `All Candidates (${currentEventApplicants.length})` },
+                    ...(!managingEvent.isApplicationsClosed
+                      ? [{ key: 'accepted', label: `Approved (${acceptedCount})` }]
+                      : []),
                     { key: 'pending', label: `Pending (${pendingCount})` },
-                    { key: 'accepted', label: `Approved (${acceptedCount})` },
                     { key: 'declined', label: `Declined (${declinedCount})` },
                   ].map((tab) => (
                     <button
@@ -2191,38 +2588,40 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                           </div>
                         </div>
 
-                        {/* Approval Actions: Tick (Approve) & Cross (Decline) */}
-                        <div className="flex sm:flex-col md:flex-row items-center gap-2 pt-2 md:pt-0 shrink-0 border-t md:border-t-0 border-gray-100 dark:border-gray-800">
-                          <button
-                            type="button"
-                            disabled={app.status === 'accepted'}
-                            title="Approve Candidate (Tick)"
-                            onClick={() => handleApplicantStatus(app.id, 'accepted', managingEvent)}
-                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border-none flex items-center justify-center gap-1.5 shadow-xs ${
-                              app.status === 'accepted'
-                                ? 'bg-emerald-600 text-white ring-2 ring-emerald-500/50 shadow-md scale-105 opacity-75 cursor-not-allowed'
-                                : 'bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-600 hover:text-white border border-emerald-200 dark:border-emerald-800 cursor-pointer'
-                            }`}
-                          >
-                            <Check className="w-4 h-4 stroke-[3]" />
-                            <span>{app.status === 'accepted' ? 'Approved ✔' : 'Approve'}</span>
-                          </button>
+                        {/* Approval Actions: Tick (Approve) & Cross (Decline) — only shown in All/Pending/Declined review tabs, hidden in Final Roster */}
+                        {applicantStatusFilter !== 'accepted' && (
+                          <div className="flex sm:flex-col md:flex-row items-center gap-2 pt-2 md:pt-0 shrink-0 border-t md:border-t-0 border-gray-100 dark:border-gray-800">
+                            <button
+                              type="button"
+                              disabled={app.status === 'accepted'}
+                              title="Approve Candidate (Tick)"
+                              onClick={() => handleApplicantStatus(app.id, 'accepted', managingEvent)}
+                              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border-none flex items-center justify-center gap-1.5 shadow-xs ${
+                                app.status === 'accepted'
+                                  ? 'bg-emerald-600 text-white ring-2 ring-emerald-500/50 shadow-md scale-105 opacity-75 cursor-not-allowed'
+                                  : 'bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-600 hover:text-white border border-emerald-200 dark:border-emerald-800 cursor-pointer'
+                              }`}
+                            >
+                              <Check className="w-4 h-4 stroke-[3]" />
+                              <span>{app.status === 'accepted' ? 'Approved ✔' : 'Approve'}</span>
+                            </button>
 
-                          <button
-                            type="button"
-                            disabled={app.status === 'declined'}
-                            title="Decline Candidate (Cross)"
-                            onClick={() => handleApplicantStatus(app.id, 'declined', managingEvent)}
-                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border-none flex items-center justify-center gap-1.5 shadow-xs ${
-                              app.status === 'declined'
-                                ? 'bg-rose-600 text-white ring-2 ring-rose-500/50 shadow-md scale-105 opacity-75 cursor-not-allowed'
-                                : 'bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 hover:bg-rose-600 hover:text-white border border-rose-200 dark:border-rose-800 cursor-pointer'
-                            }`}
-                          >
-                            <X className="w-4 h-4 stroke-[3]" />
-                            <span>{app.status === 'declined' ? 'Declined ✖' : 'Decline'}</span>
-                          </button>
-                        </div>
+                            <button
+                              type="button"
+                              disabled={app.status === 'declined'}
+                              title="Decline Candidate (Cross)"
+                              onClick={() => handleApplicantStatus(app.id, 'declined', managingEvent)}
+                              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border-none flex items-center justify-center gap-1.5 shadow-xs ${
+                                app.status === 'declined'
+                                  ? 'bg-rose-600 text-white ring-2 ring-rose-500/50 shadow-md scale-105 opacity-75 cursor-not-allowed'
+                                  : 'bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 hover:bg-rose-600 hover:text-white border border-rose-200 dark:border-rose-800 cursor-pointer'
+                              }`}
+                            >
+                              <X className="w-4 h-4 stroke-[3]" />
+                              <span>{app.status === 'declined' ? 'Declined ✖' : 'Decline'}</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )
                   })
@@ -2232,6 +2631,30 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
               {/* Modal Bottom Action Footer with Complete & Cancel Event Options */}
               <div className="pt-4 border-t border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 flex-wrap">
+                  {!managingEvent.isCompleted && !managingEvent.isCancelled && (
+                    managingEvent.isApplicationsClosed ? (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleApplications(managingEvent.id, false)}
+                        className="px-3.5 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold text-xs border border-gray-200 dark:border-gray-700 cursor-pointer flex items-center gap-1.5 transition-all shadow-2xs"
+                        title="Re-open applications to allow new volunteers to apply"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Re-open Applications</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleApplications(managingEvent.id, true)}
+                        className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs border-none cursor-pointer flex items-center gap-1.5 shadow-xs transition-all"
+                        title="Stop accepting applications and finalize volunteer team"
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>Stop Applications</span>
+                      </button>
+                    )
+                  )}
+
                   {managingEvent.isCompleted ? (
                     <span className="px-4 py-2 rounded-xl font-extrabold text-xs bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1.5 shadow-2xs">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
