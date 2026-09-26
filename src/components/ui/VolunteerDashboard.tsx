@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react'
 import OpportunitiesFeed, { OpportunitiesFeedRef, Applicant, Opportunity, INITIAL_OPPORTUNITIES } from '@/components/ui/OpportunitiesFeed'
 import { fetchOpportunitiesAction, fetchUserApplicationsAction } from '@/app/actions/opportunities'
-import { createClient } from '@/lib/supabase/client'
 import { 
   Award, 
   Clock, 
@@ -200,38 +199,32 @@ export default function VolunteerDashboard({ opportunitiesRef, userId, userEmail
     refreshData()
     syncWithDb()
 
-    const handleFocusSync = () => {
-      refreshData()
-      syncWithDb()
+    // Debounce helper to prevent rapid-fire setState cascades between components
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    const debouncedSync = () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        refreshData()
+      }, 300)
     }
 
-    window.addEventListener('togethernow_new_notification', handleFocusSync)
-    window.addEventListener('togethernow_opportunities_updated', handleFocusSync)
-    window.addEventListener('storage', handleFocusSync)
-    window.addEventListener('focus', handleFocusSync)
+    window.addEventListener('togethernow_new_notification', debouncedSync)
+    window.addEventListener('togethernow_opportunities_updated', debouncedSync)
+    window.addEventListener('storage', debouncedSync)
+    window.addEventListener('focus', debouncedSync)
 
-    // Realtime Supabase postgres listener for live seat updates & application approvals
-    const supabase = createClient()
-    const channel = supabase
-      .channel(`vol-dashboard-sync-${userScopeId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'opportunities' }, () => {
-        syncWithDb()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
-        syncWithDb()
-      })
-      .subscribe()
-
+    // Light periodic poll at 30s — OpportunitiesFeed owns the Supabase realtime channel
+    // and the 5s DB sync for seat counts. VolunteerDashboard only needs infrequent refreshes.
     const pollTimer = setInterval(() => {
       syncWithDb()
-    }, 5000)
+    }, 30000)
 
     return () => {
-      window.removeEventListener('togethernow_new_notification', handleFocusSync)
-      window.removeEventListener('togethernow_opportunities_updated', handleFocusSync)
-      window.removeEventListener('storage', handleFocusSync)
-      window.removeEventListener('focus', handleFocusSync)
-      supabase.removeChannel(channel)
+      if (debounceTimer) clearTimeout(debounceTimer)
+      window.removeEventListener('togethernow_new_notification', debouncedSync)
+      window.removeEventListener('togethernow_opportunities_updated', debouncedSync)
+      window.removeEventListener('storage', debouncedSync)
+      window.removeEventListener('focus', debouncedSync)
       clearInterval(pollTimer)
     }
   }, [userScopeId])

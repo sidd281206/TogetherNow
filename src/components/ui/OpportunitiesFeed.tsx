@@ -514,10 +514,10 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         )
         .subscribe()
 
-      // Periodic poll every 5s to guarantee consistent live seat availability across all clients
+      // Periodic poll every 30s as a safety net for missed realtime events
       const pollTimer = setInterval(() => {
         loadDbOps()
-      }, 5000)
+      }, 30000)
 
       return () => {
         window.removeEventListener('togethernow_new_notification', handleStorageUpdate)

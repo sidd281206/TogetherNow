@@ -56,7 +56,6 @@ export default function ProfileCompletionModal({
   const [otpSending, setOtpSending] = useState(false)
   const [otpVerifying, setOtpVerifying] = useState(false)
   const [otpMessage, setOtpMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null)
-  const [simulatedCode, setSimulatedCode] = useState<string | null>(null)
 
   const [saving, setSaving] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -95,11 +94,8 @@ export default function ProfileCompletionModal({
       const res = await sendEmailOtpAction(userEmail)
       if (res.success) {
         setIsOtpSent(true)
-        if (res.simulatedOtp) {
-          setSimulatedCode(res.simulatedOtp)
-        }
         setOtpMessage({
-          text: `A 6-digit OTP code has been dispatched to ${userEmail}. (Test Code: ${res.simulatedOtp || '123456'})`,
+          text: res.message,
           type: 'success',
         })
       } else {

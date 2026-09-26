@@ -3,14 +3,90 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
+import nodemailer from 'nodemailer'
 
 // In-memory OTP cache for verification codes
 const otpCache = new Map<string, { code: string; expiresAt: number }>()
 
+/** Build a polished HTML email for the OTP */
+function buildOtpEmailHtml(otp: string, email: string): string {
+  const digits = otp.split('')
+  const digitBoxes = digits
+    .map(
+      (d) =>
+        `<td style="display:inline-block;width:44px;height:54px;line-height:54px;text-align:center;font-size:28px;font-weight:800;background:#f0fdf4;border:2px solid #34d399;border-radius:10px;color:#064e3b;font-family:monospace;margin:0 4px;">${d}</td>`
+    )
+    .join('')
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TogetherNow – Email Verification</title>
+</head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:20px;box-shadow:0 4px 32px rgba(0,0,0,0.10);overflow:hidden;max-width:560px;width:100%;">
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#059669 0%,#047857 100%);padding:36px 40px 28px;text-align:center;">
+              <div style="display:inline-flex;align-items:center;gap:10px;">
+                <span style="font-size:28px;">🤝</span>
+                <span style="font-size:22px;font-weight:900;color:#ffffff;letter-spacing:-0.5px;">TogetherNow</span>
+              </div>
+              <p style="margin:10px 0 0;color:#a7f3d0;font-size:13px;font-weight:500;">Volunteer &amp; Community Platform</p>
+            </td>
+          </tr>
+          <!-- Body -->
+          <tr>
+            <td style="padding:36px 40px 32px;">
+              <h1 style="margin:0 0 8px;font-size:22px;font-weight:800;color:#111827;">Verify Your Email Address</h1>
+              <p style="margin:0 0 24px;font-size:14px;color:#6b7280;line-height:1.6;">
+                Hi there! You're one step away from completing your volunteer profile on <strong style="color:#059669;">TogetherNow</strong>.
+                Use the verification code below to confirm your email address.
+              </p>
+
+              <!-- OTP Digits -->
+              <div style="text-align:center;margin:28px 0;">
+                <p style="font-size:12px;font-weight:700;color:#9ca3af;letter-spacing:1.5px;margin:0 0 14px;text-transform:uppercase;">Your 6-Digit Verification Code</p>
+                <table cellpadding="0" cellspacing="0" style="display:inline-block;">
+                  <tr>${digitBoxes}</tr>
+                </table>
+              </div>
+
+              <!-- Expiry notice -->
+              <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:14px 18px;margin:24px 0;">
+                <p style="margin:0;font-size:13px;color:#9a3412;font-weight:600;">
+                  ⏱️ This code expires in <strong>10 minutes</strong>. Do not share it with anyone.
+                </p>
+              </div>
+
+              <p style="font-size:13px;color:#6b7280;margin:20px 0 0;line-height:1.6;">
+                If you didn't request this, you can safely ignore this email. Your account will remain secure.
+              </p>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:20px 40px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#9ca3af;">Sent to <strong>${email}</strong> · TogetherNow Volunteer Platform</p>
+              <p style="margin:6px 0 0;font-size:11px;color:#d1d5db;">© 2026 TogetherNow. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+}
+
 export async function sendEmailOtpAction(email: string): Promise<{
   success: boolean
   message: string
-  simulatedOtp?: string
 }> {
   try {
     const cleanEmail = email.trim().toLowerCase()
@@ -20,28 +96,35 @@ export async function sendEmailOtpAction(email: string): Promise<{
 
     // Generate a secure 6-digit OTP
     const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString()
-    const expiresAt = Date.now() + 10 * 60 * 1000 // 10 minutes expiry
+    otpCache.set(cleanEmail, { code: generatedOtp, expiresAt: Date.now() + 10 * 60 * 1000 })
 
-    otpCache.set(cleanEmail, { code: generatedOtp, expiresAt })
+    // Send via Nodemailer + Gmail SMTP directly (bypasses Supabase email config entirely)
+    const gmailUser = process.env.GMAIL_USER || 'siddharthshinde281206@gmail.com'
+    const gmailPass = process.env.GMAIL_APP_PASSWORD || 'drvy fwqs igsx pevp'
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    const adminClient = createAdminClient(supabaseUrl, serviceKey)
-
-    // Attempt sending native Supabase OTP
-    try {
-      await adminClient.auth.signInWithOtp({
-        email: cleanEmail,
-        options: { shouldCreateUser: false },
-      })
-    } catch (e) {
-      console.warn('Native OTP dispatch fallback (in-memory cached code used):', e)
+    if (!gmailUser || !gmailPass) {
+      console.error('GMAIL_USER or GMAIL_APP_PASSWORD not set in environment variables.')
+      return { success: false, message: 'Email service is not configured. Please contact support.' }
     }
+
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: gmailUser,
+        pass: gmailPass,
+      },
+    })
+
+    await transporter.sendMail({
+      from: `"TogetherNow" <${gmailUser}>`,
+      to: cleanEmail,
+      subject: '🔐 Your TogetherNow Verification Code',
+      html: buildOtpEmailHtml(generatedOtp, cleanEmail),
+    })
 
     return {
       success: true,
-      message: `A 6-digit verification code has been dispatched to ${cleanEmail}.`,
-      simulatedOtp: generatedOtp,
+      message: `A 6-digit verification code has been sent to ${cleanEmail}. Please check your inbox (and spam folder).`,
     }
   } catch (err: any) {
     console.error('Error in sendEmailOtpAction:', err)
@@ -51,6 +134,7 @@ export async function sendEmailOtpAction(email: string): Promise<{
     }
   }
 }
+
 
 export async function verifyEmailOtpAction(email: string, otp: string): Promise<{
   success: boolean
@@ -64,30 +148,24 @@ export async function verifyEmailOtpAction(email: string, otp: string): Promise<
       return { success: false, message: 'Please enter the 6-digit verification code.' }
     }
 
-    // Universal test code for fast testing or live cached code
+    // Validate against the in-memory OTP cache (code we generated & sent via Gmail)
     const cached = otpCache.get(cleanEmail)
-    const isMasterTestCode = cleanOtp === '123456' || cleanOtp === '000000'
-    const isCachedMatch = cached && cached.code === cleanOtp && Date.now() <= cached.expiresAt
+    const isExpired = !cached || Date.now() > cached.expiresAt
 
-    if (!isMasterTestCode && !isCachedMatch) {
-      // Also try Supabase native token verification if cached was not used
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
-      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      const adminClient = createAdminClient(supabaseUrl, serviceKey)
-
-      const { error } = await adminClient.auth.verifyOtp({
-        email: cleanEmail,
-        token: cleanOtp,
-        type: 'email',
-      })
-
-      if (error) {
-        return {
-          success: false,
-          message: 'The verification code entered is invalid or has expired. Please try again.',
-        }
+    if (isExpired) {
+      return {
+        success: false,
+        message: 'No active verification code found. Please click "Send OTP" to request a new code.',
       }
     }
+
+    if (cached.code !== cleanOtp) {
+      return {
+        success: false,
+        message: 'Incorrect verification code. Please check your email and try again.',
+      }
+    }
+
 
     // Remove from cache after successful verification
     otpCache.delete(cleanEmail)

@@ -30,7 +30,7 @@ export function VolunteerOnboardingForm({ userEmail = 'volunteer@togethernow.org
       if (res.success) {
         setIsOtpSent(true)
         setOtpNotice({
-          text: `OTP sent to ${userEmail}! (Test code: ${res.simulatedOtp || '123456'})`,
+          text: `A 6-digit verification code has been sent to ${userEmail}. Please check your inbox (and spam folder).`,
           type: 'success',
         })
       } else {
