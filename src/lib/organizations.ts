@@ -434,6 +434,26 @@ export function saveOrganizationProfile(profile: OrganizationProfileData, userId
 }
 
 /**
+ * Check if a custom About Us profile has been created and saved in localStorage
+ */
+export function hasCustomOrganizationProfile(orgNameOrId: string, currentUserId?: string): boolean {
+  if (typeof window === 'undefined') return false
+
+  try {
+    if (currentUserId && localStorage.getItem(`${ORG_ABOUT_STORAGE_KEY_PREFIX}${currentUserId}`)) {
+      return true
+    }
+    if (orgNameOrId && localStorage.getItem(`${ORG_ABOUT_STORAGE_KEY_PREFIX}${orgNameOrId}`)) {
+      return true
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  return false
+}
+
+/**
  * Helper to generate a rich default profile for any new or unknown organization name
  */
 export function generateDefaultOrgProfile(orgName: string): OrganizationProfileData {

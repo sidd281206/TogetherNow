@@ -63,25 +63,12 @@ export async function signupAction(
   if (Object.keys(errors).length > 0) return { errors }
 
   const supabase = await createClient()
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-  let { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        full_name: fullName,
-        role,
-      },
-      // After email confirmation, redirect back to the app
-      emailRedirectTo: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/callback`,
-    },
-  })
-
-  // If Supabase hits email rate limit, fallback to admin client creation and immediate sign in
-  if (error && (error.message.toLowerCase().includes('rate limit') || error.status === 429)) {
+  // Fast path: use admin client to reliably create confirmed user and avoid email gateway timeouts
+  if (serviceKey) {
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://couqorwshnrpadamzojn.supabase.co'
-      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
       const adminClient = createAdminClient(supabaseUrl, serviceKey)
 
       const { data: adminCreated, error: adminErr } = await adminClient.auth.admin.createUser({
@@ -94,7 +81,43 @@ export async function signupAction(
         },
       })
 
-      if (!adminErr && adminCreated?.user) {
+      if (adminErr) {
+        const errMsg = adminErr.message || ''
+        if (
+          errMsg.toLowerCase().includes('already') ||
+          (adminErr as any).code === 'email_exists' ||
+          adminErr.status === 422
+        ) {
+          return {
+            errors: {
+              email: ['An account with this email address already exists. Please log in instead.'],
+            },
+          }
+        }
+        return {
+          errors: {
+            general: [errMsg && errMsg !== '{}' ? errMsg : 'Unable to create account. Please try again.'],
+          },
+        }
+      }
+
+      if (adminCreated?.user) {
+        // Ensure profile row exists in public.profiles table
+        try {
+          await adminClient.from('profiles').upsert(
+            {
+              id: adminCreated.user.id,
+              full_name: fullName,
+              role: role as any,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'id' }
+          )
+        } catch (dbErr) {
+          console.warn('Notice ensuring profile on signup:', dbErr)
+        }
+
+        // Sign the newly created user in immediately so session cookies are established
         const { error: signInErr } = await supabase.auth.signInWithPassword({
           email,
           password,
@@ -103,29 +126,50 @@ export async function signupAction(
         if (!signInErr) {
           redirect('/dashboard')
         }
-        error = null
-      } else if (adminErr) {
-        console.warn('Admin user creation fallback message:', adminErr.message)
+
+        // If automatic sign-in couldn't complete, redirect to login page
+        redirect('/auth/login?registered=true')
       }
     } catch (e: any) {
       if (e?.digest?.startsWith('NEXT_REDIRECT')) {
         throw e
       }
-      console.warn('Notice in admin signup fallback:', e)
+      console.error('Error during admin signup:', e)
+      return {
+        errors: {
+          general: [e?.message && e.message !== '{}' ? e.message : 'Failed to complete registration. Please try again.'],
+        },
+      }
     }
   }
 
+  // Fallback if no service role key is configured
+  let { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        full_name: fullName,
+        role,
+      },
+      emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'}/auth/callback`,
+    },
+  })
+
   if (error) {
+    let cleanMessage = error.message
+    if (!cleanMessage || cleanMessage === '{}' || cleanMessage === '[object Object]' || error.status === 504) {
+      cleanMessage = 'The authentication server timed out. Please try again in a few moments.'
+    }
     return {
       errors: {
-        general: [error.message],
+        general: [cleanMessage],
       },
     }
   }
 
   // If email confirmation is required, session will be null
   if (data?.user && !data.session) {
-    // Attempt auto sign in
     const { error: autoSignInErr } = await supabase.auth.signInWithPassword({
       email,
       password,

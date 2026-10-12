@@ -26,8 +26,9 @@ export async function proxy(request: NextRequest) {
       }
     )
 
-    // Refresh session — IMPORTANT: do not remove this call.
-    // It keeps the user's session alive and syncs auth state.
+    // IMPORTANT: Do not add any logic between createServerClient and
+    // supabase.auth.getUser(). It refreshes the session cookie so that
+    // server components can always read a valid session.
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -38,16 +39,21 @@ export async function proxy(request: NextRequest) {
       pathname.startsWith('/auth/login') ||
       pathname.startsWith('/auth/signup')
 
-    const isDashboard = pathname.startsWith('/dashboard')
-
     // Redirect unauthenticated users away from protected routes
-    if (isDashboard && !user) {
+    if (
+      !user &&
+      !pathname.startsWith('/auth') &&
+      !pathname.startsWith('/api') &&
+      pathname !== '/' &&
+      !pathname.startsWith('/_next') &&
+      !pathname.startsWith('/favicon')
+    ) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'
       return NextResponse.redirect(url)
     }
 
-    // Redirect logged-in users away from auth pages
+    // Redirect logged-in users away from auth pages to dashboard
     if (isAuthPage && user) {
       const url = request.nextUrl.clone()
       url.pathname = '/dashboard'
@@ -57,6 +63,8 @@ export async function proxy(request: NextRequest) {
     console.error('Proxy auth error:', error)
   }
 
+  // IMPORTANT: Return supabaseResponse as-is so that session cookies are
+  // forwarded to the browser correctly.
   return supabaseResponse
 }
 
@@ -66,8 +74,7 @@ export const config = {
      * Run proxy on all routes EXCEPT:
      * - _next/static (static files)
      * - _next/image (image optimisation)
-     * - favicon.ico, sitemap.xml, robots.txt
-     * - public folder files
+     * - favicon.ico, and image files in public/
      */
     '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],

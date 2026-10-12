@@ -53,6 +53,7 @@ import { pushNotification } from '@/lib/notifications'
 import OrganizationAboutModal from '@/components/ui/OrganizationAboutModal'
 import OrganizationAboutEditorModal from '@/components/ui/OrganizationAboutEditorModal'
 import { getOrgRatingSummary } from '@/lib/ratings'
+import { hasCustomOrganizationProfile } from '@/lib/organizations'
 
 interface OrganizationDashboardProps {
   opportunitiesRef?: React.RefObject<OpportunitiesFeedRef | null>
@@ -205,6 +206,27 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
   const [showAboutEditorModal, setShowAboutEditorModal] = useState(false)
   const [previewingAboutOrgName, setPreviewingAboutOrgName] = useState<string | null>(null)
   const [aboutInitialTab, setAboutInitialTab] = useState<'about' | 'gallery' | 'pastEvents' | 'reviews' | 'contact'>('about')
+  const [hasCreatedAbout, setHasCreatedAbout] = useState(false)
+  const [dismissedAboutPrompt, setDismissedAboutPrompt] = useState(false)
+
+  useEffect(() => {
+    const checkAboutStatus = () => {
+      const created = hasCustomOrganizationProfile(organizationName || '', userId)
+      setHasCreatedAbout(created)
+    }
+    checkAboutStatus()
+
+    const handleOrgAboutUpdate = () => {
+      checkAboutStatus()
+    }
+
+    window.addEventListener('togethernow_org_about_updated', handleOrgAboutUpdate)
+    window.addEventListener('storage', handleOrgAboutUpdate)
+    return () => {
+      window.removeEventListener('togethernow_org_about_updated', handleOrgAboutUpdate)
+      window.removeEventListener('storage', handleOrgAboutUpdate)
+    }
+  }, [organizationName, userId])
 
   const handleOpenEditContact = (drive: Opportunity) => {
     setEditingContactDrive(drive)
@@ -1045,7 +1067,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
 
       {/* Organization Verification Control Bar (Verified Orgs) */}
       {userId && orgStatus === 'approved' && (
-        <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 shadow-xs flex items-center justify-between gap-3">
+        <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0">
               <ShieldCheck className="w-5 h-5" />
@@ -1053,10 +1075,77 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
             <div>
               <div className="text-xs font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-1.5">
                 <span>Organization Status: Verified</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-emerald-200 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300 text-[10px] font-extrabold">Active</span>
               </div>
               <p className="text-[11px] text-emerald-800 dark:text-emerald-300 m-0">
                 Your organization is fully verified by platform administrators. Opportunity posting access is unlocked.
               </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAboutEditorModal(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors border-none cursor-pointer shrink-0"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>{hasCreatedAbout ? 'Edit About Us & Profile' : '✨ Create About Us Page'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Action Prompt for Verified Organization: Create About Us Page */}
+      {orgStatus === 'approved' && !hasCreatedAbout && !dismissedAboutPrompt && (
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-emerald-800 via-teal-900 to-emerald-950 text-white p-5 sm:p-6 shadow-xl border border-emerald-500/40">
+          <div className="absolute -right-10 -bottom-10 w-52 h-52 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute right-1/3 -top-12 w-40 h-40 bg-teal-400/15 rounded-full blur-2xl pointer-events-none" />
+
+          <button
+            type="button"
+            onClick={() => setDismissedAboutPrompt(true)}
+            aria-label="Dismiss prompt"
+            className="absolute top-4 right-4 text-white/70 hover:text-white p-1 rounded-full hover:bg-white/10 transition-colors border-none bg-transparent cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
+            <div className="space-y-2 max-w-2xl">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 text-xs font-bold tracking-wide">
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>Verification Approved — Next Step</span>
+              </div>
+
+              <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white m-0">
+                Create your organization&apos;s About Us page 🎉
+              </h2>
+
+              <p className="text-xs sm:text-sm text-emerald-100/90 m-0 leading-relaxed">
+                Your account is now verified! Volunteers see your public profile when they click <strong>&quot;Know More&quot;</strong> on your volunteer opportunities. Share your organization&apos;s mission, vision, photos from the field, and milestones to build trust and inspire volunteers.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setShowAboutEditorModal(true)}
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-emerald-400 hover:bg-emerald-300 text-gray-950 font-black text-xs sm:text-sm shadow-md hover:shadow-xl transition-all transform hover:-translate-y-0.5 border-none cursor-pointer group"
+              >
+                <Edit3 className="w-4 h-4 text-gray-950" />
+                <span>Create About Us Page</span>
+                <ChevronRight className="w-4 h-4 text-gray-950 group-hover:translate-x-1 transition-transform" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewingAboutOrgName(organizationName || 'Ocean & Earth Care Alliance')
+                  setAboutInitialTab('about')
+                }}
+                className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs sm:text-sm border border-white/20 transition-all cursor-pointer"
+              >
+                <Eye className="w-4 h-4" />
+                <span>See Example</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1075,77 +1164,84 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
         </div>
       )}
 
-      {/* Organization Public About Us & Work Showcase Card */}
-      <div className="p-5 rounded-3xl bg-gradient-to-r from-emerald-900 via-teal-900 to-emerald-950 text-white shadow-md border border-emerald-800/60 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-start sm:items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-white flex items-center justify-center font-black text-xl shrink-0">
-            <Building2 className="w-6 h-6 text-emerald-300" />
-          </div>
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-base sm:text-lg font-black text-white m-0">
-                {organizationName || 'Your Organization'} — About Us & Public Profile
-              </h3>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-200 text-[10px] font-bold border border-emerald-400/30">
-                Public Facing
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setPreviewingAboutOrgName(organizationName || 'Ocean & Earth Care Alliance')
-                  setAboutInitialTab('reviews')
-                }}
-                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-400/25 border border-amber-300/40 text-amber-200 hover:text-white hover:bg-amber-400/40 text-xs font-bold transition-all cursor-pointer border-none"
-                title="View Volunteer Reviews"
-              >
-                <Star className="w-3 h-3 fill-amber-300 text-amber-300" />
-                <span>
-                  {getOrgRatingSummary(organizationName || 'Ocean & Earth Care Alliance').averageRating} / 5.0 (
-                  {getOrgRatingSummary(organizationName || 'Ocean & Earth Care Alliance').totalReviews} reviews)
-                </span>
-              </button>
+      {/* Organization Public About Us & Work Showcase Card — Only visible when organization is verified */}
+      {orgStatus === 'approved' && (
+        <div className="p-5 rounded-3xl bg-gradient-to-r from-emerald-900 via-teal-900 to-emerald-950 text-white shadow-md border border-emerald-800/60 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-white flex items-center justify-center font-black text-xl shrink-0">
+              <Building2 className="w-6 h-6 text-emerald-300" />
             </div>
-            <p className="text-xs text-emerald-100/80 m-0 max-w-2xl leading-relaxed">
-              Maintain your mission, impact milestones, ground work photos, and volunteer reviews. Volunteers see this when they click <strong>"Know More"</strong> next to your organization name.
-            </p>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base sm:text-lg font-black text-white m-0">
+                  {organizationName || 'Your Organization'} — About Us & Public Profile
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-200 text-[10px] font-bold border border-emerald-400/30">
+                  Public Facing
+                </span>
+                {!hasCreatedAbout && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-400/25 text-amber-200 text-[10px] font-bold border border-amber-400/40">
+                    Setup Pending
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviewingAboutOrgName(organizationName || 'Ocean & Earth Care Alliance')
+                    setAboutInitialTab('reviews')
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-400/25 border border-amber-300/40 text-amber-200 hover:text-white hover:bg-amber-400/40 text-xs font-bold transition-all cursor-pointer border-none"
+                  title="View Volunteer Reviews"
+                >
+                  <Star className="w-3 h-3 fill-amber-300 text-amber-300" />
+                  <span>
+                    {getOrgRatingSummary(organizationName || 'Ocean & Earth Care Alliance').averageRating} / 5.0 (
+                    {getOrgRatingSummary(organizationName || 'Ocean & Earth Care Alliance').totalReviews} reviews)
+                  </span>
+                </button>
+              </div>
+              <p className="text-xs text-emerald-100/80 m-0 max-w-2xl leading-relaxed">
+                Maintain your mission, impact milestones, ground work photos, and volunteer reviews. Volunteers see this when they click <strong>&quot;Know More&quot;</strong> next to your organization name.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                setPreviewingAboutOrgName(organizationName || 'Ocean & Earth Care Alliance')
+                setAboutInitialTab('reviews')
+              }}
+              className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold text-xs border border-amber-400/30 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+            >
+              <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
+              <span>Volunteer Reviews</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPreviewingAboutOrgName(organizationName || 'Ocean & Earth Care Alliance')
+                setAboutInitialTab('about')
+              }}
+              className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Preview as Volunteer</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowAboutEditorModal(true)}
+              className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-black text-xs border-none transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>{hasCreatedAbout ? 'Edit About Us & Gallery' : 'Create About Us & Gallery'}</span>
+            </button>
           </div>
         </div>
-
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          <button
-            type="button"
-            onClick={() => {
-              setPreviewingAboutOrgName(organizationName || 'Ocean & Earth Care Alliance')
-              setAboutInitialTab('reviews')
-            }}
-            className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold text-xs border border-amber-400/30 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
-          >
-            <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
-            <span>Volunteer Reviews</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setPreviewingAboutOrgName(organizationName || 'Ocean & Earth Care Alliance')
-              setAboutInitialTab('about')
-            }}
-            className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span>Preview as Volunteer</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowAboutEditorModal(true)}
-            className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-black text-xs border-none transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            <span>Edit About Us & Gallery</span>
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Main Opportunities Feed for Organization */}
       <OpportunitiesFeed

@@ -11,7 +11,7 @@ export default function AuthLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="auth-shell">
+    <div className="auth-shell" suppressHydrationWarning>
       {children}
     </div>
   )

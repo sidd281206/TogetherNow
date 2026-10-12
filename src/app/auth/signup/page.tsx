@@ -43,7 +43,7 @@ export default function SignupPage() {
   const passwordStrength = getPasswordStrength(password)
 
   return (
-    <div className="auth-page">
+    <div className="auth-page" suppressHydrationWarning>
       {/* ── Left panel ── */}
       <div className="auth-hero">
         <div className="auth-hero-content">
@@ -121,7 +121,9 @@ export default function SignupPage() {
                 <line x1="12" y1="8" x2="12" y2="12" />
                 <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
-              {state.errors.general[0]}
+              {state.errors.general[0] && state.errors.general[0] !== '{}' && state.errors.general[0] !== '[object Object]'
+                ? state.errors.general[0]
+                : 'Unable to create account. Please check your details and try again.'}
             </div>
           )}
 

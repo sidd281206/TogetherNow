@@ -397,7 +397,7 @@ export default function DashboardNavbar({
 
                 {/* Actions */}
                 <div className="space-y-1">
-                  {role === 'organization' && (
+                  {role === 'organization' && profileStatus?.orgStatus === 'approved' && (
                     <button
                       type="button"
                       onClick={() => {

@@ -291,6 +291,7 @@ interface OpportunitiesFeedProps {
   organizationName?: string
   userId?: string
   userEmail?: string
+  userName?: string
   userProfileStatus?: {
     isNewUser: boolean
     completionPercentage: number
@@ -379,7 +380,7 @@ const INITIAL_APPLICANTS: Applicant[] = [
 ]
 
 const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProps>(
-  ({ userRole = 'volunteer', organizationName, userId, userEmail = 'volunteer@togethernow.org', userProfileStatus, volunteerPreferences }, ref) => {
+  ({ userRole = 'volunteer', organizationName, userId, userEmail = 'volunteer@togethernow.org', userName, userProfileStatus, volunteerPreferences }, ref) => {
     const isCurrentUserApplicant = (a: Applicant) => {
       if (userId && a.volunteerId && a.volunteerId === userId) return true
       if (userEmail && a.email && a.email.trim().toLowerCase() === userEmail.trim().toLowerCase()) return true
@@ -1195,13 +1196,93 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       }
 
       setApplyingEvent(op)
+
+      // 1. Email Autofill
       setVolunteerApplyEmail(userEmail || 'volunteer@togethernow.org')
+
+      // 2. Full Name Autofill from user profile
+      let resolvedName = (userName || '').trim()
       try {
-        const savedPhone = localStorage.getItem(`togethernow_user_phone_${userEmail}`)
-        if (savedPhone) setVolunteerApplyPhone(savedPhone)
+        if (!resolvedName && typeof window !== 'undefined') {
+          const stored =
+            (userEmail && localStorage.getItem(`togethernow_user_name_${userEmail}`)) ||
+            (userId && localStorage.getItem(`togethernow_user_name_${userId}`)) ||
+            (userEmail && localStorage.getItem(`togethernow_volunteer_name_${userEmail}`)) ||
+            (userEmail && localStorage.getItem(`togethernow_profile_name_${userEmail}`))
+          if (stored) resolvedName = stored.trim()
+        }
       } catch {}
-      setVolunteerApplySkills(op.skillsNeeded.slice(0, 2).join(', '))
-      setVolunteerApplyNote('')
+      if (!resolvedName && userEmail && userEmail.includes('@') && !userEmail.startsWith('volunteer@')) {
+        const emailPrefix = userEmail.split('@')[0]
+        resolvedName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1)
+      }
+      setVolunteerApplyName(resolvedName)
+
+      // 3. Contact Phone Number Autofill from profile
+      let resolvedPhone = ''
+      try {
+        if (typeof window !== 'undefined') {
+          const savedPhone =
+            (userEmail && localStorage.getItem(`togethernow_user_phone_${userEmail}`)) ||
+            (userId && localStorage.getItem(`togethernow_user_phone_${userId}`)) ||
+            (userEmail && localStorage.getItem(`togethernow_phone_${userEmail}`))
+          if (savedPhone) resolvedPhone = savedPhone.trim()
+        }
+      } catch {}
+      setVolunteerApplyPhone(resolvedPhone)
+
+      // 4. Relevant Skills Autofill from user profile
+      let profileSkills: string[] = []
+      if (preferences?.skills && preferences.skills.length > 0) {
+        profileSkills = preferences.skills
+      } else if (volunteerPreferences?.skills && volunteerPreferences.skills.length > 0) {
+        profileSkills = volunteerPreferences.skills
+      } else {
+        try {
+          if (typeof window !== 'undefined') {
+            const raw =
+              (userEmail && localStorage.getItem(`togethernow_volunteer_skills_${userEmail}`)) ||
+              (userId && localStorage.getItem(`togethernow_volunteer_skills_${userId}`))
+            if (raw) {
+              const parsed = JSON.parse(raw)
+              if (Array.isArray(parsed) && parsed.length > 0) profileSkills = parsed
+            }
+          }
+        } catch {}
+      }
+
+      if (profileSkills.length > 0) {
+        // Prioritize profile skills matching event requirements, followed by other profile skills
+        const opSkillsLower = new Set(op.skillsNeeded.map((s) => s.toLowerCase()))
+        const matching = profileSkills.filter((s) => opSkillsLower.has(s.toLowerCase()))
+        const nonMatching = profileSkills.filter((s) => !opSkillsLower.has(s.toLowerCase()))
+        const mergedSkills = [...matching, ...nonMatching]
+        setVolunteerApplySkills(mergedSkills.join(', '))
+      } else {
+        setVolunteerApplySkills(op.skillsNeeded.slice(0, 2).join(', '))
+      }
+
+      // 5. Why do you want to join (Personalized Note from profile interests)
+      let profileInterests: string[] = []
+      if (preferences?.interests && preferences.interests.length > 0) {
+        profileInterests = preferences.interests
+      } else {
+        try {
+          if (typeof window !== 'undefined') {
+            const raw = (userEmail && localStorage.getItem(`togethernow_volunteer_interests_${userEmail}`)) || ''
+            if (raw) {
+              const parsed = JSON.parse(raw)
+              if (Array.isArray(parsed)) profileInterests = parsed
+            }
+          }
+        } catch {}
+      }
+
+      if (profileInterests.length > 0) {
+        setVolunteerApplyNote(`Excited to contribute to "${op.title}"! My interests include ${profileInterests.slice(0, 2).join(' & ')}, and I'd love to support ${op.organization}.`)
+      } else {
+        setVolunteerApplyNote(`Excited to participate in "${op.title}" and support ${op.organization}!`)
+      }
     }
 
     const handleSubmitVolunteerApplication = async (e: React.FormEvent) => {
@@ -2736,10 +2817,26 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
               </div>
 
               <form onSubmit={handleSubmitVolunteerApplication} className="space-y-4">
+                {/* Autofill Banner */}
+                <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200/80 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-200 text-xs shadow-2xs">
+                  <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div className="leading-snug">
+                    <span className="font-bold">Autofilled from your profile.</span>{' '}
+                    <span className="text-emerald-700/80 dark:text-emerald-300/80">You can update any field before submitting.</span>
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                    Your Full Name *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+                      Your Full Name *
+                    </label>
+                    {volunteerApplyName && (
+                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                        <Check className="w-3 h-3" /> From profile
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     required
@@ -2752,9 +2849,16 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                      Email Address *
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+                        Email Address *
+                      </label>
+                      {volunteerApplyEmail && (
+                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                          <Check className="w-3 h-3" /> Account email
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="email"
                       required
@@ -2765,9 +2869,16 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                      Phone Number
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+                        Phone Number
+                      </label>
+                      {volunteerApplyPhone && (
+                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                          <Check className="w-3 h-3" /> From profile
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="tel"
                       value={volunteerApplyPhone}
@@ -2779,9 +2890,16 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                    Relevant Skills (comma separated)
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+                      Relevant Skills (comma separated)
+                    </label>
+                    {volunteerApplySkills && (
+                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Profile skills
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={volunteerApplySkills}

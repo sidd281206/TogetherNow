@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, Suspense } from 'react'
+import { useActionState, Suspense, useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { loginAction, signInWithGoogleAction, type AuthState } from '@/app/actions/auth'
@@ -10,6 +10,14 @@ const initialState: AuthState = null
 
 function DeletedNotice() {
   const searchParams = useSearchParams()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted) return null
+
   const isDeleted = searchParams.get('deleted') === 'true'
 
   if (!isDeleted) return null
@@ -25,7 +33,7 @@ export default function LoginPage() {
   const [state, action, pending] = useActionState(loginAction, initialState)
 
   return (
-    <div className="auth-page">
+    <div className="auth-page" suppressHydrationWarning>
       {/* ── Left panel ── */}
       <div className="auth-hero">
         <div className="auth-hero-content">
@@ -105,7 +113,9 @@ export default function LoginPage() {
                 <line x1="12" y1="8" x2="12" y2="12" />
                 <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
-              {state.errors.general[0]}
+              {state.errors.general[0] && state.errors.general[0] !== '{}' && state.errors.general[0] !== '[object Object]'
+                ? state.errors.general[0]
+                : 'Invalid email or password. Please try again.'}
             </div>
           )}
 

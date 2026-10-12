@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import OpportunitiesFeed, { OpportunitiesFeedRef, Applicant, Opportunity, INITIAL_OPPORTUNITIES } from '@/components/ui/OpportunitiesFeed'
 import { fetchOpportunitiesAction, fetchUserApplicationsAction } from '@/app/actions/opportunities'
+import { createClient } from '@/lib/supabase/client'
 import { 
   Award, 
   Clock, 
@@ -273,30 +274,51 @@ export default function VolunteerDashboard({
 
     // Debounce helper to prevent rapid-fire setState cascades between components
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
-    const debouncedSync = () => {
+    const debouncedRefresh = () => {
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
         refreshData()
       }, 300)
     }
+    const debouncedDbSync = () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        // Re-fetch from DB so seat counts are always from the source of truth
+        syncWithDb()
+      }, 300)
+    }
 
-    window.addEventListener('togethernow_new_notification', debouncedSync)
-    window.addEventListener('togethernow_opportunities_updated', debouncedSync)
-    window.addEventListener('storage', debouncedSync)
-    window.addEventListener('focus', debouncedSync)
+    window.addEventListener('togethernow_new_notification', debouncedRefresh)
+    // When OpportunitiesFeed fires a bulk update, pull from DB directly for accurate seat counts
+    window.addEventListener('togethernow_opportunities_updated', debouncedDbSync)
+    window.addEventListener('storage', debouncedRefresh)
+    window.addEventListener('focus', debouncedDbSync)
 
-    // Light periodic poll at 30s — OpportunitiesFeed owns the Supabase realtime channel
-    // and the 5s DB sync for seat counts. VolunteerDashboard only needs infrequent refreshes.
+    // Supabase Realtime — own subscription so slot counts sync immediately across
+    // all volunteer dashboards even when OpportunitiesFeed is not mounted.
+    const supabase = createClient()
+    const realtimeChannel = supabase
+      .channel('volunteer-dashboard-global-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'opportunities' }, () => {
+        syncWithDb()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
+        syncWithDb()
+      })
+      .subscribe()
+
+    // Fallback poll every 15s as safety net for missed realtime events
     const pollTimer = setInterval(() => {
       syncWithDb()
-    }, 30000)
+    }, 15000)
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer)
-      window.removeEventListener('togethernow_new_notification', debouncedSync)
-      window.removeEventListener('togethernow_opportunities_updated', debouncedSync)
-      window.removeEventListener('storage', debouncedSync)
-      window.removeEventListener('focus', debouncedSync)
+      window.removeEventListener('togethernow_new_notification', debouncedRefresh)
+      window.removeEventListener('togethernow_opportunities_updated', debouncedDbSync)
+      window.removeEventListener('storage', debouncedRefresh)
+      window.removeEventListener('focus', debouncedDbSync)
+      supabase.removeChannel(realtimeChannel)
       clearInterval(pollTimer)
     }
   }, [userScopeId])
@@ -903,6 +925,7 @@ export default function VolunteerDashboard({
         userRole="volunteer"
         userId={userId}
         userEmail={userEmail}
+        userName={userName}
         userProfileStatus={profileStatus}
         volunteerPreferences={preferences}
       />
