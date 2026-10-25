@@ -21,6 +21,7 @@ import {
   Loader2
 } from 'lucide-react'
 import { sendEmailOtpAction, verifyEmailOtpAction, saveCompleteUserProfileAction } from '@/app/actions/verification'
+import VolunteerPhotoUploadModal from './VolunteerPhotoUploadModal'
 
 interface ProfileCompletionModalProps {
   isOpen: boolean
@@ -91,6 +92,8 @@ export default function ProfileCompletionModal({
   const [skills, setSkills] = useState(() => formatInitial(initialSkills, 'Photography, Social Media, Teamwork'))
   const [interests, setInterests] = useState(() => formatInitial(initialInterests, 'Photography, Environment, Education'))
   const [availability, setAvailability] = useState('weekends')
+  const [avatarUrl, setAvatarUrl] = useState<string>('')
+  const [showPhotoModal, setShowPhotoModal] = useState(false)
 
   // OTP Verification State
   const [otp, setOtp] = useState('')
@@ -133,7 +136,22 @@ export default function ProfileCompletionModal({
       if (storedVerified === 'true' || isComplete === 'true') {
         setIsEmailVerified(true)
       }
+
+      const storedAvatar = localStorage.getItem(`togethernow_user_avatar_${userEmail}`)
+      if (storedAvatar) {
+        setAvatarUrl(storedAvatar)
+      }
     } catch {}
+
+    const handleAvatarUpdate = (e: any) => {
+      if (e?.detail) setAvatarUrl(e.detail)
+    }
+    window.addEventListener('togethernow_avatar_updated', handleAvatarUpdate)
+    window.addEventListener('storage', handleAvatarUpdate)
+    return () => {
+      window.removeEventListener('togethernow_avatar_updated', handleAvatarUpdate)
+      window.removeEventListener('storage', handleAvatarUpdate)
+    }
   }, [userEmail])
 
   // Sync initial props
@@ -350,6 +368,62 @@ export default function ProfileCompletionModal({
 
         <form onSubmit={handleSaveProfile} className="space-y-4">
           
+          {/* PROFILE PHOTO CARD */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-indigo-50 dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-indigo-950/40 border border-emerald-200/80 dark:border-emerald-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+            <div className="flex items-center gap-4">
+              <div className="relative group shrink-0">
+                <div className="w-16 h-16 rounded-full overflow-hidden ring-3 ring-emerald-500/40 dark:ring-emerald-400/50 shadow-md bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center font-extrabold text-xl">
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={fullName}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span>{fullName ? fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() : 'V'}</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPhotoModal(true)}
+                  className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-md border-2 border-white dark:border-gray-900 cursor-pointer transition-transform hover:scale-110"
+                  title="Change Profile Photo"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <h4 className="font-black text-sm text-gray-900 dark:text-white m-0">
+                    Profile Photo
+                  </h4>
+                  {avatarUrl ? (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold">
+                      ✓ Photo Active
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 text-[10px] font-bold">
+                      Photo Recommended
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-600 dark:text-gray-300 m-0">
+                  Visible to organizations and drive managers for roster check-in &amp; attendance verification.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowPhotoModal(true)}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-white dark:bg-gray-800 hover:bg-emerald-50 dark:hover:bg-gray-700 text-emerald-700 dark:text-emerald-300 font-extrabold text-xs border border-emerald-200 dark:border-emerald-800/80 shadow-2xs hover:shadow-xs transition-all cursor-pointer shrink-0"
+            >
+              <Camera className="w-4 h-4 text-emerald-600" />
+              <span>{avatarUrl ? 'Change Photo' : 'Upload Photo'}</span>
+            </button>
+          </div>
+
           {/* SECTION 1: PERSONAL & CONTACT */}
           <div className="p-4 rounded-2xl bg-gray-50/70 dark:bg-gray-800/60 border border-gray-200/80 dark:border-gray-700/70 space-y-3">
             <div className="flex items-center justify-between">
@@ -686,6 +760,17 @@ export default function ProfileCompletionModal({
         </form>
 
       </div>
+
+      {/* Volunteer Profile Photo Upload Modal */}
+      <VolunteerPhotoUploadModal
+        isOpen={showPhotoModal}
+        onClose={() => setShowPhotoModal(false)}
+        userEmail={userEmail}
+        currentAvatarUrl={avatarUrl}
+        onUploadSuccess={(url) => {
+          setAvatarUrl(url)
+        }}
+      />
     </div>
   )
 }

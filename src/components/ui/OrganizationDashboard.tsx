@@ -1889,6 +1889,13 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                 filteredDriveCandidates.map((cand) => {
                   const isMarkedPresent = attendanceMap[cand.id] ?? (cand.status === 'accepted')
 
+                  const candInitials = cand.name
+                    .split(' ')
+                    .map((n) => n[0])
+                    .join('')
+                    .slice(0, 2)
+                    .toUpperCase()
+
                   return (
                     <div
                       key={cand.id}
@@ -1900,21 +1907,30 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                           : 'bg-white dark:bg-gray-800/60 border-gray-100 dark:border-gray-800 shadow-xs'
                       }`}
                     >
-                      <div className="space-y-1.5 flex-1">
-                        <div className="flex items-center gap-2">
-                          <h5 className="font-extrabold text-sm text-gray-900 dark:text-white m-0">
-                            {cand.name}
-                          </h5>
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-xs shadow-xs shrink-0 overflow-hidden ring-2 ring-indigo-200/50">
+                          {cand.avatarUrl ? (
+                            <img src={cand.avatarUrl} alt={cand.name} className="w-full h-full object-cover" />
+                          ) : (
+                            candInitials
+                          )}
+                        </div>
 
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              cand.status === 'accepted'
-                                ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
-                                : cand.status === 'declined'
-                                ? 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300'
-                                : 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
-                            }`}
-                          >
+                        <div className="space-y-1.5 flex-1">
+                          <div className="flex items-center gap-2">
+                            <h5 className="font-extrabold text-sm text-gray-900 dark:text-white m-0">
+                              {cand.name}
+                            </h5>
+
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                cand.status === 'accepted'
+                                  ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                                  : cand.status === 'declined'
+                                  ? 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300'
+                                  : 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
+                              }`}
+                            >
                             {cand.status === 'accepted' ? (
                               <>
                                 <Check className="w-2.5 h-2.5 stroke-[3]" /> Approved
@@ -1970,6 +1986,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                           </p>
                         )}
                       </div>
+                    </div>
 
                       {/* Tick & Cross Actions — only shown in All/Pending/Declined review tabs, hidden in Final Roster */}
                       {candidateFilter !== 'accepted' && (

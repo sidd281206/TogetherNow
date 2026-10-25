@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useActionState } from 'react'
-import { completeVolunteerProfileAction, completeOrganizationProfileAction, type OnboardingState } from '@/app/actions/onboarding'
+import { completeVolunteerProfileAction, completeOrganizationProfileAction, completeDonorProfileAction, type OnboardingState } from '@/app/actions/onboarding'
 import { sendEmailOtpAction, verifyEmailOtpAction } from '@/app/actions/verification'
 import { Check, Mail, KeyRound, Sparkles, ShieldCheck } from 'lucide-react'
 
@@ -479,6 +479,253 @@ export function OrganizationOnboardingForm({
 
       <button type="submit" disabled={pending || isUploadingFile} className="auth-btn-primary">
         {pending ? 'Saving...' : isUploadingFile ? 'Uploading Document...' : initialData ? 'Submit Changes & Re-verify' : 'Submit for Verification'}
+      </button>
+    </form>
+  )
+}
+
+// ─── Donor Onboarding Form ────────────────────────────────────────────────────
+
+interface DonorOnboardingFormProps {
+  userEmail?: string
+  initialData?: {
+    phone?: string
+    address?: string
+    city?: string
+    pincode?: string
+    panNumber?: string
+  } | null
+}
+
+export function DonorOnboardingForm({
+  userEmail = 'donor@togethernow.org',
+  initialData,
+}: DonorOnboardingFormProps) {
+  const [state, action, pending] = useActionState(completeDonorProfileAction, null as OnboardingState)
+
+  // OTP States — identical flow to VolunteerOnboardingForm
+  const [otp, setOtp] = useState('')
+  const [isOtpSent, setIsOtpSent] = useState(false)
+  const [isEmailVerified, setIsEmailVerified] = useState(Boolean(initialData))
+  const [otpSending, setOtpSending] = useState(false)
+  const [otpVerifying, setOtpVerifying] = useState(false)
+  const [otpNotice, setOtpNotice] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+
+  const handleSendOtp = async () => {
+    setOtpSending(true)
+    setOtpNotice(null)
+    try {
+      const res = await sendEmailOtpAction(userEmail)
+      if (res.success) {
+        setIsOtpSent(true)
+        setOtpNotice({
+          text: `A 6-digit verification code has been sent to ${userEmail}. Please check your inbox (and spam folder).`,
+          type: 'success',
+        })
+      } else {
+        setOtpNotice({ text: res.message || 'Failed to send OTP.', type: 'error' })
+      }
+    } catch (err: any) {
+      setOtpNotice({ text: err?.message || 'Error sending OTP.', type: 'error' })
+    } finally {
+      setOtpSending(false)
+    }
+  }
+
+  const handleVerifyOtp = async () => {
+    if (!otp.trim()) return
+    setOtpVerifying(true)
+    setOtpNotice(null)
+    try {
+      const res = await verifyEmailOtpAction(userEmail, otp.trim())
+      if (res.success) {
+        setIsEmailVerified(true)
+        setOtpNotice({ text: '✓ Email successfully verified with OTP!', type: 'success' })
+      } else {
+        setOtpNotice({ text: res.message || 'Invalid OTP code.', type: 'error' })
+      }
+    } catch (err: any) {
+      setOtpNotice({ text: err?.message || 'Verification error.', type: 'error' })
+    } finally {
+      setOtpVerifying(false)
+    }
+  }
+
+  return (
+    <form action={action} className="auth-form" noValidate>
+      {/* General error */}
+      {state?.errors?.general && (
+        <div className="auth-alert auth-alert-error" role="alert">
+          {state.errors.general[0]}
+        </div>
+      )}
+
+      {/* OTP error */}
+      {state?.errors?.otp && (
+        <div className="auth-alert auth-alert-error" role="alert">
+          {state.errors.otp[0]}
+        </div>
+      )}
+
+      {/* Hidden: email verified state */}
+      <input type="hidden" name="isEmailVerified" value={isEmailVerified ? 'true' : 'false'} />
+
+      {/* Donor intro notice */}
+      <div style={{ padding: '12px 14px', borderRadius: '12px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', fontSize: '0.82rem', marginBottom: '16px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+        <span style={{ fontSize: '1rem', flexShrink: 0 }}>💛</span>
+        <span><strong>Welcome, Donor!</strong> Complete your profile to unlock donation campaigns from verified NGOs and track your giving impact.</span>
+      </div>
+
+      {/* 1. Phone Number */}
+      <div className="auth-field">
+        <label htmlFor="donor-phone" className="auth-label">Phone Number *</label>
+        <input
+          id="donor-phone"
+          name="phone"
+          type="tel"
+          required
+          defaultValue={initialData?.phone || ''}
+          placeholder="e.g. +91 98201 44521"
+          className={`auth-input ${state?.errors?.phone ? 'auth-input-error' : ''}`}
+        />
+        {state?.errors?.phone && <p className="auth-field-error">{state.errors.phone[0]}</p>}
+      </div>
+
+      {/* 2. Address */}
+      <div className="auth-field">
+        <label htmlFor="donor-address" className="auth-label">Street / Area Address *</label>
+        <input
+          id="donor-address"
+          name="address"
+          type="text"
+          required
+          defaultValue={initialData?.address || ''}
+          placeholder="e.g. Flat 402, Green Valley Apartments, Andheri West"
+          className={`auth-input ${state?.errors?.address ? 'auth-input-error' : ''}`}
+        />
+      </div>
+
+      {/* 3. City + Pincode */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div className="auth-field">
+          <label htmlFor="donor-city" className="auth-label">City *</label>
+          <input
+            id="donor-city"
+            name="city"
+            type="text"
+            required
+            defaultValue={initialData?.city || 'Mumbai'}
+            placeholder="e.g. Mumbai"
+            className="auth-input"
+          />
+        </div>
+        <div className="auth-field">
+          <label htmlFor="donor-pincode" className="auth-label">Pincode / Postal Code</label>
+          <input
+            id="donor-pincode"
+            name="pincode"
+            type="text"
+            defaultValue={initialData?.pincode || ''}
+            placeholder="e.g. 400053"
+            className="auth-input"
+          />
+        </div>
+      </div>
+      {state?.errors?.address && <p className="auth-field-error">{state.errors.address[0]}</p>}
+
+      {/* 4. PAN Number (optional) */}
+      <div className="auth-field">
+        <label htmlFor="donor-pan" className="auth-label">
+          PAN Number <span style={{ fontWeight: 400, color: '#94a3b8', fontSize: '0.78rem' }}>(Optional — for 80G tax receipts)</span>
+        </label>
+        <input
+          id="donor-pan"
+          name="panNumber"
+          type="text"
+          defaultValue={initialData?.panNumber || ''}
+          placeholder="e.g. ABCDE1234F"
+          className="auth-input"
+          style={{ textTransform: 'uppercase', letterSpacing: '1px' }}
+        />
+        <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px' }}>
+          Your PAN is used only for generating donation tax receipts under Section 80G. Never shared publicly.
+        </p>
+        {state?.errors?.panNumber && <p className="auth-field-error">{state.errors.panNumber[0]}</p>}
+      </div>
+
+      {/* 5. Email OTP Verification — identical UI to volunteer form */}
+      <div style={{ padding: '14px', borderRadius: '14px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#78350f', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <KeyRound style={{ width: '16px', height: '16px', color: '#d97706' }} />
+            Email Verification
+          </span>
+          {isEmailVerified ? (
+            <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#047857', backgroundColor: '#d1fae5', padding: '2px 8px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Check style={{ width: '12px', height: '12px', strokeWidth: 3 }} /> Verified (100%)
+            </span>
+          ) : (
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#b45309' }}>
+              Verification Pending
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', backgroundColor: '#ffffff', padding: '8px 12px', borderRadius: '10px', border: '1px solid #fde68a', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', color: '#78350f', fontWeight: 600 }}>
+            <Mail style={{ width: '14px', height: '14px', color: '#d97706' }} />
+            <span>{userEmail}</span>
+          </div>
+          {!isEmailVerified && (
+            <button
+              id="donor-send-otp"
+              type="button"
+              onClick={handleSendOtp}
+              disabled={otpSending}
+              style={{ padding: '6px 12px', borderRadius: '8px', backgroundColor: '#d97706', color: '#ffffff', fontSize: '0.75rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+            >
+              {otpSending ? 'Sending...' : isOtpSent ? 'Resend OTP' : 'Send OTP'}
+            </button>
+          )}
+        </div>
+
+        {otpNotice && (
+          <div style={{ padding: '8px 10px', borderRadius: '8px', fontSize: '0.78rem', fontWeight: 600, backgroundColor: otpNotice.type === 'success' ? '#ecfdf5' : '#fff1f2', color: otpNotice.type === 'success' ? '#065f46' : '#9f1239', border: otpNotice.type === 'success' ? '1px solid #a7f3d0' : '1px solid #fecdd3', marginBottom: '8px' }}>
+            {otpNotice.text}
+          </div>
+        )}
+
+        {!isEmailVerified && isOtpSent && (
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            <input
+              id="donor-otp-input"
+              type="text"
+              maxLength={6}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value)}
+              placeholder="Enter 6-digit OTP"
+              style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid #fde68a', fontSize: '0.82rem', textAlign: 'center', letterSpacing: '2px', fontWeight: 'bold' }}
+            />
+            <button
+              id="donor-verify-otp"
+              type="button"
+              onClick={handleVerifyOtp}
+              disabled={otpVerifying || !otp.trim()}
+              style={{ padding: '8px 14px', borderRadius: '8px', backgroundColor: '#10b981', color: '#ffffff', fontSize: '0.78rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+            >
+              {otpVerifying ? 'Verifying...' : 'Verify OTP'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Submit */}
+      <button id="donor-submit" type="submit" disabled={pending} className="auth-btn-primary">
+        {pending
+          ? 'Saving Profile...'
+          : initialData
+          ? 'Save Profile Changes'
+          : 'Complete Donor Profile & Start Giving 💛'}
       </button>
     </form>
   )

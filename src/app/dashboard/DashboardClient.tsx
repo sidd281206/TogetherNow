@@ -5,6 +5,9 @@ import DashboardNavbar from '@/components/ui/DashboardNavbar'
 import ProfilePromptBanner from '@/components/ui/ProfilePromptBanner'
 import VolunteerDashboard from '@/components/ui/VolunteerDashboard'
 import OrganizationDashboard from '@/components/ui/OrganizationDashboard'
+import DonorDashboard from '@/components/ui/DonorDashboard'
+import OrgFundraisingPanel from '@/components/ui/OrgFundraisingPanel'
+import OrgEmployeesPanel from '@/components/ui/OrgEmployeesPanel'
 import { OpportunitiesFeedRef } from '@/components/ui/OpportunitiesFeed'
 import { Check, CheckCircle2, User, SlidersHorizontal } from 'lucide-react'
 import ResubmitApplicationButton from '@/components/ui/ResubmitApplicationButton'
@@ -46,6 +49,10 @@ interface DashboardClientProps {
     city: string
   }
   organizationName?: string
+  donationRequests?: any[]
+  donorStats?: { totalDonated: number; causesCount: number }
+  myCampaigns?: any[]
+  avatarUrl?: string
 }
 
 export default function DashboardClient({
@@ -53,6 +60,10 @@ export default function DashboardClient({
   profileStatus,
   organizationName: orgNameFromDb,
   volunteerPreferences,
+  donationRequests = [],
+  donorStats = { totalDonated: 0, causesCount: 0 },
+  myCampaigns = [],
+  avatarUrl,
 }: DashboardClientProps) {
   const opportunitiesRef = useRef<OpportunitiesFeedRef | null>(null)
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -79,6 +90,7 @@ export default function DashboardClient({
       <DashboardNavbar
         user={user}
         profileStatus={profileStatus}
+        avatarUrl={avatarUrl}
         onSearchClick={handleSearchClick}
         onPostOpportunityClick={handlePostOpportunityClick}
         onOpenProfileClick={() => setShowProfileModal(true)}
@@ -92,8 +104,12 @@ export default function DashboardClient({
         <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 sm:p-8 border border-gray-100 dark:border-gray-800 shadow-xs flex items-center justify-between gap-4">
           <div className="flex items-center gap-4 sm:gap-6">
             <div className="relative shrink-0">
-              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-black text-2xl shadow-md">
-                {firstName[0]?.toUpperCase()}
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-black text-2xl shadow-md overflow-hidden">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt={firstName} className="w-full h-full object-cover" />
+                ) : (
+                  firstName[0]?.toUpperCase()
+                )}
               </div>
               {role === 'organization' && profileStatus.orgStatus === 'approved' && (
                 <span
@@ -172,12 +188,33 @@ export default function DashboardClient({
 
         {/* Dashboard Feed based on role */}
         {role === 'organization' ? (
-          <OrganizationDashboard
-            opportunitiesRef={opportunitiesRef}
+          <>
+            <OrgEmployeesPanel
+              organizationId={user.id}
+              organizationName={organizationName}
+            />
+            <OrganizationDashboard
+              opportunitiesRef={opportunitiesRef}
+              userId={user.id}
+              userEmail={user.email || ''}
+              orgStatus={profileStatus.orgStatus}
+              organizationName={organizationName}
+            />
+            {profileStatus.orgStatus === 'approved' && (
+              <OrgFundraisingPanel
+                orgStatus={profileStatus.orgStatus}
+                organizationName={organizationName}
+                myCampaigns={myCampaigns}
+              />
+            )}
+          </>
+        ) : role === 'donor' ? (
+          <DonorDashboard
             userId={user.id}
             userEmail={user.email || ''}
-            orgStatus={profileStatus.orgStatus}
-            organizationName={organizationName}
+            userName={fullName}
+            donationRequests={donationRequests}
+            donorStats={donorStats}
           />
         ) : (
           <VolunteerDashboard
@@ -185,6 +222,7 @@ export default function DashboardClient({
             userId={user.id}
             userEmail={user.email || ''}
             userName={fullName}
+            avatarUrl={avatarUrl}
             profileStatus={profileStatus}
             volunteerPreferences={volunteerPreferences}
           />

@@ -191,6 +191,38 @@ export default function LoginPage() {
               Create one free
             </Link>
           </p>
+
+          <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid rgba(0,0,0,0.08)', display: 'flex', flexDirection: 'column', gap: '0.6rem', alignItems: 'center' }}>
+            <Link
+              href="/event-manager/login"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                color: '#4f46e5',
+                textDecoration: 'none',
+              }}
+            >
+              <span>👔 Are you an Event Manager? Sign In with Employee ID →</span>
+            </Link>
+
+            <Link
+              href="/admin/login"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                color: '#059669',
+                textDecoration: 'none',
+              }}
+            >
+              <span>🛡️ Platform Administrator? Access Admin Portal →</span>
+            </Link>
+          </div>
         </div>
       </div>
     </div>

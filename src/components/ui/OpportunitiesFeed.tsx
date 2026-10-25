@@ -86,6 +86,7 @@ export interface Opportunity {
   completedAt?: string
   isApplicationsClosed?: boolean
   applicationsClosedAt?: string
+  assignedEmployeeIds?: string[]
 }
 
 export interface Applicant {
@@ -100,6 +101,8 @@ export interface Applicant {
   note?: string
   status: 'pending' | 'accepted' | 'declined'
   appliedAt: string
+  avatarUrl?: string
+  attendance?: 'present' | 'absent' | 'unmarked'
 }
 
 function getGoogleMapsUrl(addressOrLocation: string): string {
@@ -480,6 +483,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
     const [newAddress, setNewAddress] = useState('')
     const [newManagerName, setNewManagerName] = useState('')
     const [newManagerPhone, setNewManagerPhone] = useState('')
+    const [newAssignedCodes, setNewAssignedCodes] = useState('EM101')
     const [newIsRemote, setNewIsRemote] = useState(false)
     const [newDate, setNewDate] = useState('')
     const [newStartTime, setNewStartTime] = useState('09:00')
@@ -1402,6 +1406,13 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       const location = newIsRemote ? 'Remote' : (newLocation.trim() || newAddress.trim() || 'Marine Drive, Mumbai')
       const fullAddress = newIsRemote ? 'Online / Remote' : (newAddress.trim() || newLocation.trim() || 'Gate 2 Promenade, Marine Drive Coastal Stretch, Mumbai 400020')
 
+      const assignedEmployeeIds = newAssignedCodes
+        ? newAssignedCodes
+            .split(',')
+            .map((s) => s.trim().toUpperCase())
+            .filter(Boolean)
+        : ['EM101']
+
       const newOpPayload: Opportunity = {
         id: `event-${Date.now()}`,
         title: newTitle.trim(),
@@ -1414,6 +1425,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         address: fullAddress,
         managerName,
         managerPhone,
+        assignedEmployeeIds,
         isRemote: newIsRemote,
         date: formattedDate,
         time: formattedTime,
@@ -1444,6 +1456,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
           address: fullAddress,
           managerName,
           managerPhone,
+          assignedEmployeeIds,
           isRemote: newIsRemote,
           date: formattedDate,
           time: formattedTime,
@@ -2596,8 +2609,12 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                       >
                         <div className="space-y-2 flex-1">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-sm shadow-xs shrink-0">
-                              {initials}
+                            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-sm shadow-xs shrink-0 overflow-hidden ring-2 ring-indigo-200/50">
+                              {app.avatarUrl ? (
+                                <img src={app.avatarUrl} alt={app.name} className="w-full h-full object-cover" />
+                              ) : (
+                                initials
+                              )}
                             </div>
                             <div>
                               <div className="flex items-center gap-2">
@@ -3107,6 +3124,23 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                         className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-between">
+                      <span>Event Manager Employee Code(s) *</span>
+                      <span className="text-[10px] text-indigo-600 font-normal">Can enter multiple (e.g. EM101, EM102)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newAssignedCodes}
+                      onChange={(e) => setNewAssignedCodes(e.target.value.toUpperCase())}
+                      placeholder="e.g. EM101, EM102"
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 font-mono font-bold text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <p className="text-[10px] text-indigo-700/80 dark:text-indigo-300/80 m-0 mt-1">
+                      Assigned employees can log in at <code>/event-manager/login</code> to verify volunteers and track attendance.
+                    </p>
                   </div>
                 </div>
 

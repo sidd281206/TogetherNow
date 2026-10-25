@@ -17,6 +17,7 @@ export type OnboardingState = {
     website?: string[]
     registrationNumber?: string[]
     verification?: string[]
+    panNumber?: string[]
   }
   message?: string
 } | null
@@ -256,5 +257,97 @@ export async function completeOrganizationProfileAction(
   revalidatePath('/dashboard')
   revalidatePath('/onboarding')
 
+  redirect('/dashboard')
+}
+
+export async function completeDonorProfileAction(
+  _state: OnboardingState,
+  formData: FormData
+): Promise<OnboardingState> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/auth/login')
+  }
+
+  const phone = formData.get('phone')?.toString().trim() ?? ''
+  const address = formData.get('address')?.toString().trim() ?? ''
+  const city = formData.get('city')?.toString().trim() ?? ''
+  const pincode = formData.get('pincode')?.toString().trim() ?? ''
+  const panNumber = formData.get('panNumber')?.toString().trim() ?? ''
+  const isEmailVerifiedStr = formData.get('isEmailVerified')?.toString() ?? 'false'
+
+  const errors: NonNullable<OnboardingState>['errors'] = {}
+
+  if (!phone) {
+    errors.phone = ['Phone number is required.']
+  }
+  if (!address || !city) {
+    errors.address = ['Address and city are required.']
+  }
+  if (isEmailVerifiedStr !== 'true') {
+    errors.otp = ['Please verify your email with OTP before saving your profile.']
+  }
+
+  if (Object.keys(errors).length > 0) return { errors }
+
+  const fullAddress = pincode ? `${address}, ${city} - ${pincode}` : `${address}, ${city}`
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  const adminClient = createAdminClient(supabaseUrl, serviceKey)
+
+  // 1. Update auth user metadata
+  try {
+    await adminClient.auth.admin.updateUserById(user.id, {
+      email_confirm: true,
+      user_metadata: {
+        ...user.user_metadata,
+        phone,
+        address: fullAddress,
+        city,
+        pincode,
+        email_verified: true,
+        isEmailVerified: true,
+        profile_completed: true,
+        completionPercentage: 100,
+      },
+    })
+  } catch (err) {
+    console.warn('Notice updating donor auth metadata:', err)
+  }
+
+  // 2. Update profiles table
+  try {
+    await adminClient.from('profiles').upsert({
+      id: user.id,
+      phone,
+      address: fullAddress,
+      city,
+      email_verified: true,
+    })
+  } catch (err) {
+    console.warn('Notice updating donor profiles table:', err)
+  }
+
+  // 3. Upsert donor_profiles table
+  const { error } = await adminClient.from('donor_profiles').upsert({
+    id: user.id,
+    phone,
+    address: fullAddress,
+    city,
+    pincode,
+    pan_number: panNumber || null,
+    email_verified: true,
+  })
+
+  if (error) {
+    console.error('Error saving donor profile:', error)
+    return { errors: { general: [error.message] } }
+  }
+
+  revalidatePath('/dashboard')
+  revalidatePath('/onboarding')
   redirect('/dashboard')
 }

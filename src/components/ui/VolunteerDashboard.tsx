@@ -34,6 +34,7 @@ import OrganizationRatingModal from '@/components/ui/OrganizationRatingModal'
 import { getOrgRatingSummary, hasVolunteerReviewedEvent } from '@/lib/ratings'
 import RecommendedOpportunitiesSection from '@/components/ui/RecommendedOpportunitiesSection'
 import ProfileCompletionModal from '@/components/ui/ProfileCompletionModal'
+import VolunteerPhotoPromptBanner from '@/components/ui/VolunteerPhotoPromptBanner'
 import { VolunteerPreferences } from '@/lib/recommendations'
 
 interface VolunteerDashboardProps {
@@ -41,6 +42,7 @@ interface VolunteerDashboardProps {
   userId?: string
   userEmail?: string
   userName?: string
+  avatarUrl?: string
   profileStatus?: {
     isNewUser: boolean
     completionPercentage: number
@@ -66,6 +68,7 @@ export default function VolunteerDashboard({
   userId,
   userEmail,
   userName,
+  avatarUrl,
   profileStatus,
   volunteerPreferences,
 }: VolunteerDashboardProps) {
@@ -338,6 +341,13 @@ export default function VolunteerDashboard({
 
   return (
     <div suppressHydrationWarning className="space-y-8">
+      {/* Volunteer Profile Photo Upload Prompt Banner */}
+      <VolunteerPhotoPromptBanner
+        userEmail={userEmail}
+        userName={userName}
+        initialAvatarUrl={avatarUrl}
+      />
+
       {/* Latest Approval Notification Banner (if recent approval occurred) */}
       {latestApprovalNotification && latestApprovalNotification.unread && (
         <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white shadow-xl flex items-center justify-between gap-4 animate-in slide-in-from-top-2 border border-emerald-400/30">

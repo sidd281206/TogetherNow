@@ -50,6 +50,7 @@ interface DashboardNavbarProps {
     interests: string[]
     city: string
   }
+  avatarUrl?: string
 }
 
 export default function DashboardNavbar({
@@ -59,7 +60,9 @@ export default function DashboardNavbar({
   onPostOpportunityClick,
   onOpenProfileClick,
   volunteerPreferences,
+  avatarUrl: initialAvatarUrl,
 }: DashboardNavbarProps) {
+  const [currentAvatar, setCurrentAvatar] = useState<string>(initialAvatarUrl || '')
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
@@ -73,10 +76,16 @@ export default function DashboardNavbar({
 
   const [clientCompletion, setClientCompletion] = useState<number>(profileStatus.completionPercentage)
 
-  // Live Profile Strength listener
+  // Live Profile Strength & Avatar listener
   useEffect(() => {
-    const refreshCompletion = () => {
+    const refreshCompletion = (e?: any) => {
       try {
+        if (e && e.type === 'togethernow_avatar_updated' && e.detail) {
+          setCurrentAvatar(e.detail)
+        }
+        const storedAv = user.email ? localStorage.getItem(`togethernow_user_avatar_${user.email}`) : null
+        if (storedAv) setCurrentAvatar(storedAv)
+
         const isLocallyComplete = typeof window !== 'undefined' && localStorage.getItem(`togethernow_profile_complete_${user.email}`) === 'true'
         if (isLocallyComplete) {
           setClientCompletion(100)
@@ -87,9 +96,11 @@ export default function DashboardNavbar({
     }
     refreshCompletion()
 
+    window.addEventListener('togethernow_avatar_updated', refreshCompletion)
     window.addEventListener('togethernow_profile_completed', refreshCompletion)
     window.addEventListener('storage', refreshCompletion)
     return () => {
+      window.removeEventListener('togethernow_avatar_updated', refreshCompletion)
       window.removeEventListener('togethernow_profile_completed', refreshCompletion)
       window.removeEventListener('storage', refreshCompletion)
     }
@@ -317,8 +328,12 @@ export default function DashboardNavbar({
               </div>
               
               <div className="relative">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white flex items-center justify-center font-bold text-xs shadow-xs ring-2 ring-emerald-500/20 dark:ring-emerald-400/20 transition-transform group-hover:scale-105">
-                  {firstName[0]?.toUpperCase()}
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white flex items-center justify-center font-bold text-xs shadow-xs ring-2 ring-emerald-500/20 dark:ring-emerald-400/20 transition-transform group-hover:scale-105 overflow-hidden">
+                  {currentAvatar ? (
+                    <img src={currentAvatar} alt={firstName} className="w-full h-full object-cover" />
+                  ) : (
+                    firstName[0]?.toUpperCase()
+                  )}
                 </div>
                 {role === 'organization' && profileStatus.orgStatus === 'approved' && (
                   <span
@@ -342,8 +357,12 @@ export default function DashboardNavbar({
               <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-800 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="flex items-center gap-3 pb-3 mb-3 border-b border-gray-100 dark:border-gray-800">
                   <div className="relative">
-                    <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shadow-xs">
-                      {firstName[0]?.toUpperCase()}
+                    <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shadow-xs overflow-hidden">
+                      {currentAvatar ? (
+                        <img src={currentAvatar} alt={fullName} className="w-full h-full object-cover" />
+                      ) : (
+                        firstName[0]?.toUpperCase()
+                      )}
                     </div>
                     {role === 'organization' && profileStatus.orgStatus === 'approved' && (
                       <span

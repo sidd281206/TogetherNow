@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { VolunteerOnboardingForm, OrganizationOnboardingForm } from './OnboardingForms'
+import { VolunteerOnboardingForm, OrganizationOnboardingForm, DonorOnboardingForm } from './OnboardingForms'
 
 export const metadata = {
   title: 'Complete Your Profile — TogetherNow',
@@ -17,6 +17,7 @@ export default async function OnboardingPage() {
   const role: string = user.user_metadata?.role ?? 'volunteer'
   let initialOrgData = null
   let initialVolunteerData = null
+  let initialDonorData = null
 
   if (role === 'volunteer') {
     const { data: volProfile } = await supabase
@@ -71,6 +72,22 @@ export default async function OnboardingPage() {
         status: orgProfile.status,
       }
     }
+  } else if (role === 'donor') {
+    const { data: donorProfile } = await supabase
+      .from('donor_profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (donorProfile) {
+      initialDonorData = {
+        phone: donorProfile.phone || '',
+        address: donorProfile.address || '',
+        city: donorProfile.city || '',
+        pincode: donorProfile.pincode || '',
+        panNumber: donorProfile.pan_number || '',
+      }
+    }
   } else {
     redirect('/dashboard')
   }
@@ -82,6 +99,8 @@ export default async function OnboardingPage() {
           <h2 className="auth-form-title">
             {role === 'volunteer'
               ? (initialVolunteerData ? 'Edit My Volunteer Profile' : 'Complete Volunteer Profile')
+              : role === 'donor'
+              ? (initialDonorData ? 'Edit My Donor Profile' : 'Complete Donor Profile')
               : initialOrgData
               ? 'Re-submit Organization Verification'
               : 'Verify Your Organization'}
@@ -99,6 +118,11 @@ export default async function OnboardingPage() {
           <VolunteerOnboardingForm
             userEmail={user.email || ''}
             initialData={initialVolunteerData}
+          />
+        ) : role === 'donor' ? (
+          <DonorOnboardingForm
+            userEmail={user.email || ''}
+            initialData={initialDonorData}
           />
         ) : (
           <OrganizationOnboardingForm

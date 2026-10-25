@@ -38,18 +38,20 @@ export default async function DashboardPage() {
 
   let volunteerPreferences: { skills: string[]; interests: string[]; city: string } | undefined
 
+  const { data: userProfile } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  const avatarUrl = userProfile?.avatar_url || user.user_metadata?.avatar_url || ''
+
   // Check profile in database and user metadata
-  if (role === 'volunteer' || role === 'donor') {
+  if (role === 'volunteer') {
     const userMeta = user.user_metadata || {}
 
     const { data: volProfile } = await supabase
       .from('volunteer_profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle()
-
-    const { data: userProfile } = await supabase
-      .from('profiles')
       .select('*')
       .eq('id', user.id)
       .maybeSingle()
@@ -97,6 +99,29 @@ export default async function DashboardPage() {
 
       completionPercentage = Math.min(100, score)
     }
+  } else if (role === 'donor') {
+    const { data: donorProfile } = await supabase
+      .from('donor_profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    const userMeta = user.user_metadata || {}
+    const isEmailVerified = Boolean(donorProfile?.email_verified || user.email_confirmed_at || userMeta.email_verified || userMeta.isEmailVerified)
+    const hasPhone = Boolean(donorProfile?.phone || userMeta.phone)
+    const hasAddress = Boolean(donorProfile?.city || userMeta.city)
+
+    if (userMeta.profile_completed || userMeta.completionPercentage === 100) {
+      completionPercentage = 100
+      isNewUser = false
+    } else {
+      let score = 0
+      if (hasPhone) { score += 33 } else { missingFields.push('phone number') }
+      if (hasAddress) { score += 33 } else { missingFields.push('address details') }
+      if (isEmailVerified) { score += 34 } else { missingFields.push('email OTP verification') }
+      if (!donorProfile && !hasPhone) isNewUser = true
+      completionPercentage = Math.min(100, score)
+    }
   } else if (role === 'organization') {
     const { data: orgProfile } = await supabase
       .from('organizations')
@@ -138,6 +163,38 @@ export default async function DashboardPage() {
     organizationName = profileRow?.full_name || user.user_metadata?.full_name || undefined
   }
 
+  // Fetch donation requests for donor dashboard
+  let donationRequests: any[] = []
+  let donorStats: { totalDonated: number; causesCount: number } = { totalDonated: 0, causesCount: 0 }
+  if (role === 'donor') {
+    const { data: requests } = await supabase
+      .from('donation_requests')
+      .select('*')
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+    donationRequests = requests ?? []
+
+    const { data: myDonations } = await supabase
+      .from('donations')
+      .select('amount, donation_request_id')
+      .eq('donor_id', user.id)
+    donorStats = {
+      totalDonated: myDonations?.reduce((s, d) => s + Number(d.amount), 0) ?? 0,
+      causesCount: new Set(myDonations?.map(d => d.donation_request_id).filter(Boolean)).size,
+    }
+  }
+
+  // Fetch org's own campaigns
+  let myCampaigns: any[] = []
+  if (role === 'organization' && orgStatus === 'approved') {
+    const { data: campaigns } = await supabase
+      .from('donation_requests')
+      .select('*')
+      .eq('organization_id', user.id)
+      .order('created_at', { ascending: false })
+    myCampaigns = campaigns ?? []
+  }
+
   const profileStatus = {
     isNewUser,
     completionPercentage,
@@ -152,6 +209,10 @@ export default async function DashboardPage() {
       profileStatus={profileStatus}
       organizationName={organizationName}
       volunteerPreferences={volunteerPreferences}
+      donationRequests={donationRequests}
+      donorStats={donorStats}
+      myCampaigns={myCampaigns}
+      avatarUrl={avatarUrl}
     />
   )
 }

@@ -43,6 +43,8 @@ export async function proxy(request: NextRequest) {
     if (
       !user &&
       !pathname.startsWith('/auth') &&
+      !pathname.startsWith('/event-manager') &&
+      !pathname.startsWith('/admin') &&
       !pathname.startsWith('/api') &&
       pathname !== '/' &&
       !pathname.startsWith('/_next') &&

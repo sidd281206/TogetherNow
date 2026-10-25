@@ -19,6 +19,7 @@ export interface DbOpportunityInput {
   alreadyRegistered?: number
   skillsNeeded: string[]
   description: string
+  assignedEmployeeIds?: string[]
   isCancelled?: boolean
   cancelledAt?: string
   cancelReason?: string
@@ -40,6 +41,7 @@ export interface DbOpportunityOutput {
   address?: string
   managerName?: string
   managerPhone?: string
+  assignedEmployeeIds?: string[]
   isRemote: boolean
   date: string
   time: string
@@ -145,7 +147,10 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
     time: input.time || '09:00 AM - 01:00 PM',
     spots_left: input.spotsLeft,
     skills_needed: input.skillsNeeded || [],
-    description: input.description.trim(),
+    assigned_employee_ids: input.assignedEmployeeIds || [],
+    description: injectMetadataIntoDescription(input.description.trim(), {
+      assignedEmployeeIds: input.assignedEmployeeIds || [],
+    }),
   }
 
   const { data: inserted, error: insertErr } = await adminClient
@@ -185,6 +190,7 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
       totalRequired: input.totalRequired ?? (input.spotsLeft + (input.alreadyRegistered ?? 0)),
       alreadyRegistered: input.alreadyRegistered ?? 0,
       skillsNeeded: input.skillsNeeded || [],
+      assignedEmployeeIds: input.assignedEmployeeIds || [],
       description: input.description.trim(),
       createdAt: basicInserted?.created_at || new Date().toISOString(),
     }
@@ -204,6 +210,7 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
     address: inserted.address || address,
     managerName: inserted.manager_name || managerName,
     managerPhone: inserted.manager_phone || managerPhone,
+    assignedEmployeeIds: inserted.assigned_employee_ids || input.assignedEmployeeIds || [],
     isRemote: inserted.is_remote ?? input.isRemote,
     date: inserted.date || input.date || 'Upcoming',
     time: inserted.time || input.time || '09:00 AM - 01:00 PM',
@@ -322,6 +329,9 @@ export async function fetchOpportunitiesAction(): Promise<DbOpportunityOutput[]>
           address: op.address || meta.address || op.location || 'Local Community Center',
           managerName: resolvedManagerName,
           managerPhone: op.manager_phone || meta.managerPhone || '',
+          assignedEmployeeIds: Array.isArray(op.assigned_employee_ids) && op.assigned_employee_ids.length > 0
+            ? op.assigned_employee_ids
+            : (meta.assignedEmployeeIds || []),
           isRemote: Boolean(op.is_remote),
           date: op.date || 'Upcoming',
           time: op.time || 'Flexible',
@@ -409,6 +419,8 @@ export interface DbApplicantRecord {
   note?: string
   status: 'pending' | 'accepted' | 'declined'
   appliedAt: string
+  avatarUrl?: string
+  attendance?: 'present' | 'absent' | 'unmarked'
 }
 
 export async function submitVolunteerApplicationAction(payload: {
@@ -583,7 +595,7 @@ export async function fetchApplicantsAction(): Promise<DbApplicantRecord[]> {
     }
 
     // Fetch user details for applicants
-    const userMap = new Map<string, { name: string; email: string; phone: string }>()
+    const userMap = new Map<string, { name: string; email: string; phone: string; avatarUrl?: string }>()
     try {
       const { data: usersData } = await adminClient.auth.admin.listUsers()
       if (usersData?.users) {
@@ -592,11 +604,27 @@ export async function fetchApplicantsAction(): Promise<DbApplicantRecord[]> {
             name: (u.user_metadata?.full_name || u.email?.split('@')[0] || 'Volunteer').trim(),
             email: u.email || '',
             phone: u.phone || u.user_metadata?.phone || '',
+            avatarUrl: u.user_metadata?.avatar_url || '',
           })
         })
       }
     } catch (uErr) {
       console.warn('Notice reading users for applicants:', uErr)
+    }
+
+    // Fetch user profile avatars from profiles table
+    const profileAvatarMap = new Map<string, string>()
+    try {
+      const { data: profs } = await adminClient
+        .from('profiles')
+        .select('id, avatar_url')
+      if (profs) {
+        profs.forEach((p) => {
+          if (p.avatar_url) profileAvatarMap.set(p.id, p.avatar_url)
+        })
+      }
+    } catch (pErr) {
+      console.warn('Notice reading profile avatars:', pErr)
     }
 
     // Fetch volunteer profiles for skills
@@ -629,11 +657,29 @@ export async function fetchApplicantsAction(): Promise<DbApplicantRecord[]> {
       console.warn('Notice reading opportunities for applicants:', oErr)
     }
 
+    // Fetch attendance records from event_attendance
+    const attendanceMap = new Map<string, 'present' | 'absent'>()
+    try {
+      const { data: attData } = await adminClient
+        .from('event_attendance')
+        .select('event_id, volunteer_id, status')
+      if (attData) {
+        attData.forEach((att) => {
+          attendanceMap.set(`${att.event_id}_${att.volunteer_id}`, att.status as any)
+        })
+      }
+    } catch (attErr) {
+      // Table might not exist yet
+    }
+
     return dbApps.map((a) => {
       const uInfo = userMap.get(a.volunteer_id)
       const skills = skillsMap.get(a.volunteer_id) || ['Community Support', 'Volunteering']
       const status: 'pending' | 'accepted' | 'declined' =
         a.status === 'accepted' ? 'accepted' : a.status === 'rejected' ? 'declined' : 'pending'
+      const avatarUrl = profileAvatarMap.get(a.volunteer_id) || uInfo?.avatarUrl || ''
+      const attKey = `${a.opportunity_id}_${a.volunteer_id}`
+      const attendance = (a.attendance_status as any) || attendanceMap.get(attKey) || 'unmarked'
 
       return {
         id: a.id,
@@ -646,6 +692,8 @@ export async function fetchApplicantsAction(): Promise<DbApplicantRecord[]> {
         skills,
         note: '',
         status,
+        avatarUrl,
+        attendance,
         appliedAt: a.applied_at
           ? new Date(a.applied_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
           : 'Recently',
