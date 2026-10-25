@@ -452,3 +452,172 @@ export async function markVolunteerAttendanceAction(payload: {
     return { success: false, error: err?.message || 'Failed to record attendance.' }
   }
 }
+
+// ── 7. Validate Event Managers Against Organization Employee Database ──────────
+export interface ManagerValidationResult {
+  index: number
+  name: string
+  employeeId: string
+  isValid: boolean
+  matchedEmployeeName?: string
+  error?: string
+}
+
+export async function validateEventManagersAction(
+  managers: { name: string; employeeId: string }[]
+): Promise<{
+  allValid: boolean
+  results: ManagerValidationResult[]
+  totalEmployees: number
+}> {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      return {
+        allValid: false,
+        results: managers.map((m, i) => ({
+          index: i,
+          name: m.name,
+          employeeId: m.employeeId,
+          isValid: false,
+          error: 'You must be signed in as an organization to validate event managers.',
+        })),
+        totalEmployees: 0,
+      }
+    }
+
+    const admin = getAdminClient()
+
+    // Fetch all active employees for this organization directly from database
+    const { data: dbEmployees, error: empErr } = await admin
+      .from('organization_employees')
+      .select('employee_id, name, is_active')
+      .eq('organization_id', user.id)
+      .eq('is_active', true)
+
+    if (empErr) {
+      console.error('Error fetching employees from database:', empErr)
+      return {
+        allValid: false,
+        results: managers.map((m, i) => ({
+          index: i,
+          name: m.name,
+          employeeId: m.employeeId,
+          isValid: false,
+          error: `Database error querying employee records: ${empErr.message}. Cannot verify event manager.`,
+        })),
+        totalEmployees: 0,
+      }
+    }
+
+    // Build lookup maps strictly from DB employees
+    const empByCode = new Map<string, string>() // UPPERCASE employee_id -> registered name
+
+    if (dbEmployees && dbEmployees.length > 0) {
+      dbEmployees.forEach((e: any) => {
+        if (e.employee_id && e.name) {
+          empByCode.set(e.employee_id.trim().toUpperCase(), e.name.trim())
+        }
+      })
+    }
+
+    const totalEmployees = empByCode.size
+
+    // If the organization has no employees registered in the database, NEVER allow posting!
+    if (totalEmployees === 0) {
+      return {
+        allValid: false,
+        results: managers.map((m, i) => ({
+          index: i,
+          name: m.name,
+          employeeId: m.employeeId,
+          isValid: false,
+          error: `No employee records found in the database for your organization. You must add employees in the 'Organization Employees' panel below before you can assign them to an event.`,
+        })),
+        totalEmployees: 0,
+      }
+    }
+
+    const results: ManagerValidationResult[] = managers.map((m, i) => {
+      const cleanCode = (m.employeeId || '').trim().toUpperCase()
+      const cleanName = (m.name || '').trim()
+
+      if (!cleanCode) {
+        return {
+          index: i,
+          name: m.name,
+          employeeId: m.employeeId,
+          isValid: false,
+          error: 'Please enter the Employee ID for this event manager.',
+        }
+      }
+
+      if (!cleanName) {
+        return {
+          index: i,
+          name: m.name,
+          employeeId: m.employeeId,
+          isValid: false,
+          error: 'Please enter the Event Manager name.',
+        }
+      }
+
+      // 1. Check if employee ID exists in the organization's database records
+      const dbRegisteredName = empByCode.get(cleanCode)
+      if (!dbRegisteredName) {
+        return {
+          index: i,
+          name: m.name,
+          employeeId: m.employeeId,
+          isValid: false,
+          error: `Employee ID "${cleanCode}" was not found in your organization's employee database. Please register this employee in the Employee Management section first.`,
+        }
+      }
+
+      // 2. Check if the entered name matches the registered name in database
+      const dbNameNorm = dbRegisteredName.toLowerCase().replace(/\s+/g, ' ').trim()
+      const inputNameNorm = cleanName.toLowerCase().replace(/\s+/g, ' ').trim()
+
+      if (dbNameNorm !== inputNameNorm) {
+        return {
+          index: i,
+          name: m.name,
+          employeeId: m.employeeId,
+          isValid: false,
+          matchedEmployeeName: dbRegisteredName,
+          error: `Event manager name mismatch: The employee record for ID "${cleanCode}" is registered as "${dbRegisteredName}" in your database, but you entered "${cleanName}". Please use the registered employee name.`,
+        }
+      }
+
+      return {
+        index: i,
+        name: m.name,
+        employeeId: m.employeeId,
+        isValid: true,
+        matchedEmployeeName: dbRegisteredName,
+      }
+    })
+
+    return {
+      allValid: results.every((r) => r.isValid),
+      results,
+      totalEmployees,
+    }
+  } catch (err: any) {
+    console.error('Error validating event managers:', err)
+    // Strictly fail closed: do NOT allow posting if database validation fails
+    return {
+      allValid: false,
+      results: managers.map((m, i) => ({
+        index: i,
+        name: m.name,
+        employeeId: m.employeeId,
+        isValid: false,
+        error: `Database verification failed: ${err?.message || 'Unable to connect to database'}. Posting is not permitted until records can be verified.`,
+      })),
+      totalEmployees: 0,
+    }
+  }
+}

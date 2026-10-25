@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useState, useActionState, useEffect } from 'react'
-import { Heart, TrendingUp, Users, Target, Calendar, X, ChevronRight, Wallet, AlertCircle, CheckCircle2, Building2, Sparkles } from 'lucide-react'
+import React, { useState, useActionState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
+import { Heart, TrendingUp, Users, Target, Calendar, X, ChevronRight, Wallet, AlertCircle, CheckCircle2, Building2, Sparkles, Search, Filter } from 'lucide-react'
 import { makeDonationAction } from '@/app/actions/donations'
 
 interface DonationRequest {
@@ -31,6 +31,10 @@ interface DonorDashboardProps {
   userName: string
   donationRequests: DonationRequest[]
   donorStats: DonorStats
+}
+
+export interface DonorDashboardRef {
+  focusSearch: () => void
 }
 
 const CAUSE_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -98,6 +102,7 @@ function CampaignCard({
           />
         </div>
       ) : (
+
         <div style={{ height: '80px', background: `linear-gradient(135deg, ${causeColor.dot}30, ${causeColor.dot}10)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <span style={{ fontSize: '2rem' }}>
             {campaign.cause_category === 'Education' ? '📚'
@@ -370,16 +375,56 @@ function DonateModal({
   )
 }
 
-export default function DonorDashboard({
+const CATEGORIES = ['All', 'Education', 'Healthcare', 'Environment', 'Disaster Relief', 'Animal Welfare', 'Community']
+
+const DonorDashboard = forwardRef<DonorDashboardRef, DonorDashboardProps>(function DonorDashboard({
   userId,
   userEmail,
   userName,
   donationRequests,
   donorStats,
-}: DonorDashboardProps) {
+}, ref) {
   const [selectedCampaign, setSelectedCampaign] = useState<DonationRequest | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState('All')
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
-  const firstName = userName.split(' ')[0]
+  useImperativeHandle(ref, () => ({
+    focusSearch: () => {
+      if (searchInputRef.current) {
+        searchInputRef.current.focus()
+        searchInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    },
+  }))
+
+  const filteredCampaigns = donationRequests.filter((campaign) => {
+    const q = searchQuery.toLowerCase().trim()
+    const matchesSearch =
+      !q ||
+      campaign.title.toLowerCase().includes(q) ||
+      campaign.organization_name.toLowerCase().includes(q) ||
+      campaign.cause_category.toLowerCase().includes(q) ||
+      campaign.description.toLowerCase().includes(q)
+
+    const matchesCategory =
+      selectedCategory === 'All' || campaign.cause_category === selectedCategory
+
+    return matchesSearch && matchesCategory
+  })
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (searchInputRef.current) {
+      searchInputRef.current.blur()
+    }
+  }
+
+  const handleClearFilters = () => {
+    setSearchQuery('')
+    setSelectedCategory('All')
+    searchInputRef.current?.focus()
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -419,6 +464,145 @@ export default function DonorDashboard({
         </div>
       </div>
 
+      {/* Campaign Search & Filter Controls */}
+      <div id="donor-campaigns" style={{ backgroundColor: '#ffffff', borderRadius: '20px', border: '1px solid #e2e8f0', padding: '18px 20px', boxShadow: '0 2px 10px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '240px' }}>
+            <Search style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', width: '16px', height: '16px', color: '#94a3b8' }} />
+            <input
+              ref={searchInputRef}
+              id="donor-search-input"
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search campaigns by cause, title, or organization..."
+              style={{
+                width: '100%',
+                padding: '11px 40px 11px 38px',
+                borderRadius: '12px',
+                border: '1.5px solid #e2e8f0',
+                fontSize: '0.88rem',
+                fontWeight: 500,
+                outline: 'none',
+                boxSizing: 'border-box',
+                backgroundColor: '#f8fafc',
+                transition: 'all 0.2s ease',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = '#f59e0b'
+                e.currentTarget.style.backgroundColor = '#ffffff'
+                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(245, 158, 11, 0.15)'
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = '#e2e8f0'
+                e.currentTarget.style.backgroundColor = '#f8fafc'
+                e.currentTarget.style.boxShadow = 'none'
+              }}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                id="donor-search-clear"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search"
+                style={{
+                  position: 'absolute',
+                  right: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '20px',
+                  height: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: '#64748b',
+                }}
+              >
+                <X style={{ width: '12px', height: '12px' }} />
+              </button>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            id="donor-search-submit"
+            style={{
+              padding: '11px 20px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+              color: '#ffffff',
+              fontSize: '0.85rem',
+              fontWeight: 800,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 6px rgba(245, 158, 11, 0.25)',
+              transition: 'opacity 0.15s ease',
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.9' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
+          >
+            <Search style={{ width: '14px', height: '14px' }} />
+            <span>Search</span>
+          </button>
+        </form>
+
+        {/* Category Pills */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
+          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+            <Filter style={{ width: '12px', height: '12px' }} /> Category:
+          </span>
+          {CATEGORIES.map((cat) => {
+            const isSelected = selectedCategory === cat
+            const count = cat === 'All'
+              ? donationRequests.length
+              : donationRequests.filter((r) => r.cause_category === cat).length
+
+            return (
+              <button
+                key={cat}
+                type="button"
+                id={`donor-category-${cat.toLowerCase().replace(/\s+/g, '-')}`}
+                onClick={() => setSelectedCategory(cat)}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '999px',
+                  fontSize: '0.75rem',
+                  fontWeight: isSelected ? 800 : 600,
+                  border: isSelected ? '1.5px solid #f59e0b' : '1px solid #e2e8f0',
+                  backgroundColor: isSelected ? '#fffbeb' : '#ffffff',
+                  color: isSelected ? '#b45309' : '#64748b',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <span>{cat}</span>
+                <span style={{
+                  fontSize: '0.65rem',
+                  padding: '1px 5px',
+                  borderRadius: '999px',
+                  backgroundColor: isSelected ? '#fde68a' : '#f1f5f9',
+                  color: isSelected ? '#92400e' : '#64748b',
+                  fontWeight: 700,
+                }}>
+                  {count}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       {/* Campaign grid */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
@@ -432,7 +616,7 @@ export default function DonorDashboard({
           </div>
           <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#d97706', backgroundColor: '#fffbeb', padding: '4px 10px', borderRadius: '999px', border: '1px solid #fde68a', display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Sparkles style={{ width: '12px', height: '12px' }} />
-            {donationRequests.length} Live
+            {filteredCampaigns.length} {filteredCampaigns.length === 1 ? 'Campaign' : 'Campaigns'}
           </div>
         </div>
 
@@ -444,9 +628,34 @@ export default function DonorDashboard({
               Organizations will post fundraising campaigns here. Check back soon!
             </p>
           </div>
+        ) : filteredCampaigns.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '50px 20px', backgroundColor: '#fff', borderRadius: '20px', border: '1px dashed #e2e8f0' }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>🔍</div>
+            <h3 style={{ margin: '0 0 6px', fontWeight: 700, color: '#374151' }}>No matching campaigns found</h3>
+            <p style={{ margin: '0 0 16px', color: '#94a3b8', fontSize: '0.82rem' }}>
+              Try adjusting your search terms or clearing selected category filters.
+            </p>
+            <button
+              type="button"
+              id="donor-reset-search-btn"
+              onClick={handleClearFilters}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '10px',
+                backgroundColor: '#fffbeb',
+                color: '#b45309',
+                border: '1px solid #fde68a',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Reset Filters
+            </button>
+          </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '18px' }}>
-            {donationRequests.map(campaign => (
+            {filteredCampaigns.map(campaign => (
               <CampaignCard
                 key={campaign.id}
                 campaign={campaign}
@@ -466,4 +675,6 @@ export default function DonorDashboard({
       )}
     </div>
   )
-}
+})
+
+export default DonorDashboard

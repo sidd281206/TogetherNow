@@ -38,7 +38,8 @@ import {
   Star,
   Download,
   Printer,
-  Copy
+  Copy,
+  ChevronDown
 } from 'lucide-react'
 import { 
   createOpportunityAction, 
@@ -49,6 +50,7 @@ import {
   markOpportunityCompletedAction,
   toggleApplicationsAction
 } from '@/app/actions/opportunities'
+import { validateEventManagersAction, ManagerValidationResult, fetchOrgEmployeesAction, OrgEmployee } from '@/app/actions/event-manager'
 import { pushNotification } from '@/lib/notifications'
 import ProfileCompletionModal from './ProfileCompletionModal'
 import OrganizationAboutModal from '@/components/ui/OrganizationAboutModal'
@@ -488,9 +490,39 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
     const [newCategory, setNewCategory] = useState<Opportunity['category']>('Community')
     const [newLocation, setNewLocation] = useState('')
     const [newAddress, setNewAddress] = useState('')
+    const [availableOrgEmployees, setAvailableOrgEmployees] = useState<OrgEmployee[]>([])
+    const [openManagerDropdownIndex, setOpenManagerDropdownIndex] = useState<number | null>(null)
+    const [managerSearchTerm, setManagerSearchTerm] = useState('')
     const [eventManagers, setEventManagers] = useState<EventManagerDetails[]>([
-      { name: '', phone: '', employeeId: 'EM101' },
+      { name: '', phone: '', employeeId: '' },
     ])
+
+    // Load registered organization employees from database when modal opens
+    useEffect(() => {
+      if (showCreateModal && userRole === 'organization') {
+        fetchOrgEmployeesAction(userId)
+          .then((emps) => {
+            if (emps && emps.length > 0) {
+              setAvailableOrgEmployees(emps.filter((e) => e.isActive !== false))
+            } else {
+              setAvailableOrgEmployees([])
+            }
+          })
+          .catch(() => setAvailableOrgEmployees([]))
+      }
+    }, [showCreateModal, userRole, userId])
+
+    // Close manager selection dropdown when clicking outside
+    useEffect(() => {
+      const handleOutsideClick = (e: MouseEvent) => {
+        const target = e.target as HTMLElement
+        if (!target.closest('.manager-select-container')) {
+          setOpenManagerDropdownIndex(null)
+        }
+      }
+      document.addEventListener('mousedown', handleOutsideClick)
+      return () => document.removeEventListener('mousedown', handleOutsideClick)
+    }, [])
 
     const handleManagerCountChange = (count: number) => {
       const targetCount = Math.max(1, Math.min(8, count))
@@ -502,7 +534,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
             added.push({
               name: '',
               phone: '',
-              employeeId: `EM10${i + 1}`,
+              employeeId: '',
             })
           }
           return [...prev, ...added]
@@ -516,7 +548,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       if (eventManagers.length >= 8) return
       setEventManagers((prev) => [
         ...prev,
-        { name: '', phone: '', employeeId: `EM10${prev.length + 1}` },
+        { name: '', phone: '', employeeId: '' },
       ])
     }
 
@@ -540,6 +572,9 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
     const [newAlreadyRegistered, setNewAlreadyRegistered] = useState(0)
     const [newSkills, setNewSkills] = useState('')
     const [newDescription, setNewDescription] = useState('')
+    const [managerValidationErrors, setManagerValidationErrors] = useState<ManagerValidationResult[]>([])
+    const [isValidatingManagers, setIsValidatingManagers] = useState(false)
+    const [createFormError, setCreateFormError] = useState<string | null>(null)
 
     const STORAGE_KEY = 'togethernow_posted_opportunities'
 
@@ -1447,6 +1482,57 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       e.preventDefault()
       if (!newTitle.trim() || !newDescription.trim()) return
 
+      // Clear previous errors
+      setCreateFormError(null)
+      setManagerValidationErrors([])
+
+      // 1. Basic field checks
+      const hasEmptyFields = eventManagers.some((m) => !m.name.trim() || !m.employeeId.trim())
+      if (hasEmptyFields) {
+        setCreateFormError('Please enter both the Manager Name and Employee ID for each event manager.')
+        setManagerValidationErrors(
+          eventManagers
+            .map((m, idx) => ({
+              index: idx,
+              name: m.name,
+              employeeId: m.employeeId,
+              isValid: Boolean(m.name.trim() && m.employeeId.trim()),
+              error: !m.name.trim() ? 'Manager name is required' : !m.employeeId.trim() ? 'Employee ID is required' : undefined,
+            }))
+            .filter((r) => !r.isValid)
+        )
+        return
+      }
+
+      // 2. Client-side database verification
+      const managersToValidate = eventManagers.map((m) => ({
+        name: m.name.trim(),
+        employeeId: m.employeeId.trim().toUpperCase(),
+      }))
+
+      setIsValidatingManagers(true)
+      try {
+        const validation = await validateEventManagersAction(managersToValidate)
+
+        if (!validation.allValid) {
+          setIsValidatingManagers(false)
+          setManagerValidationErrors(validation.results.filter((r) => !r.isValid))
+          const firstError = validation.results.find((r) => !r.isValid)
+          setCreateFormError(
+            firstError?.error ||
+            'One or more event managers do not match your employee records in the database. Posting is not permitted.'
+          )
+          return
+        }
+      } catch (valErr: any) {
+        setIsValidatingManagers(false)
+        setCreateFormError(
+          valErr?.message || 'Database verification failed. Event posting is not permitted until manager records can be verified.'
+        )
+        return
+      }
+
+      // 3. Prepare payload
       const skillsNeeded = newSkills
         ? newSkills.split(',').map((s) => s.trim()).filter(Boolean)
         : ['Volunteering']
@@ -1469,59 +1555,24 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       const assignedEmployeeIds = eventManagers
         .map((m) => m.employeeId.trim().toUpperCase())
         .filter(Boolean)
-      if (assignedEmployeeIds.length === 0) assignedEmployeeIds.push('EM101')
 
-      const validManagers: EventManagerDetails[] = eventManagers.map((m, idx) => ({
-        name: m.name.trim() || `${orgName} Coordinator ${idx + 1}`,
+      const validManagers: EventManagerDetails[] = eventManagers.map((m) => ({
+        name: m.name.trim(),
         phone: m.phone.trim() || '+91 98201 44521',
-        employeeId: m.employeeId.trim().toUpperCase() || `EM10${idx + 1}`,
+        employeeId: m.employeeId.trim().toUpperCase(),
       }))
 
       const managerNames = validManagers.map((m) => m.name).filter(Boolean)
-      const managerName = managerNames.join(', ') || orgName || 'Drive Coordinator'
+      const managerName = managerNames.join(', ') || orgName
       const managerPhones = validManagers.map((m) => m.phone).filter(Boolean)
       const managerPhone = managerPhones.join(', ') || '+91 98201 44521'
       const location = newIsRemote ? 'Remote' : (newLocation.trim() || newAddress.trim() || 'Marine Drive, Mumbai')
       const fullAddress = newIsRemote ? 'Online / Remote' : (newAddress.trim() || newLocation.trim() || 'Gate 2 Promenade, Marine Drive Coastal Stretch, Mumbai 400020')
 
-      const newOpPayload: Opportunity = {
-        id: `event-${Date.now()}`,
-        title: newTitle.trim(),
-        organization: orgName,
-        organizationId: userId || '',
-        isVerifiedOrg: true,
-        orgStatus: 'approved',
-        category: newCategory,
-        location,
-        address: fullAddress,
-        managerName,
-        managerPhone,
-        eventManagers: validManagers,
-        assignedEmployeeIds,
-        isRemote: newIsRemote,
-        date: formattedDate,
-        time: formattedTime,
-        spotsLeft: computedSpotsLeft,
-        totalRequired: totalReq,
-        alreadyRegistered: alreadyReg,
-        skillsNeeded,
-        description: newDescription.trim(),
-      }
-
+      // 4. Server-side creation with strict database verification
+      let res: any = null
       try {
-        const localSaved = localStorage.getItem(STORAGE_KEY)
-        const currentSaved: Opportunity[] = localSaved ? JSON.parse(localSaved) : []
-        const updated = [newOpPayload, ...currentSaved.filter((o) => o.id !== newOpPayload.id)]
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-        window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
-      } catch (err) {
-        console.warn('Error saving opportunity to localStorage:', err)
-      }
-
-      setOpportunities((prev) => [newOpPayload, ...prev.filter((o) => o.id !== newOpPayload.id)])
-
-      try {
-        const res = await createOpportunityAction({
+        res = await createOpportunityAction({
           title: newTitle.trim(),
           category: newCategory,
           location,
@@ -1539,40 +1590,63 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
           skillsNeeded,
           description: newDescription.trim(),
         })
+      } catch (err: any) {
+        setIsValidatingManagers(false)
+        setCreateFormError(err?.message || 'Server error while verifying and posting event.')
+        return
+      }
 
-        if (res.opportunity) {
-          const dbAssigned: Opportunity = {
-            ...newOpPayload,
-            ...res.opportunity,
-            managerName: res.opportunity.managerName || newOpPayload.managerName,
-            managerPhone: res.opportunity.managerPhone || newOpPayload.managerPhone,
-            eventManagers: res.opportunity.eventManagers || validManagers,
-            address: res.opportunity.address || newOpPayload.address,
-            location: res.opportunity.location || newOpPayload.location,
-            date: res.opportunity.date || newOpPayload.date,
-            time: res.opportunity.time || newOpPayload.time,
-            totalRequired: res.opportunity.totalRequired ?? newOpPayload.totalRequired,
-            alreadyRegistered: res.opportunity.alreadyRegistered ?? newOpPayload.alreadyRegistered,
-            spotsLeft: res.opportunity.spotsLeft ?? newOpPayload.spotsLeft,
-          }
-          setOpportunities((prev) => [
-            dbAssigned,
-            ...prev.filter((o) => o.id !== newOpPayload.id && o.id !== dbAssigned.id),
-          ])
+      setIsValidatingManagers(false)
 
-          try {
-            const localSaved = localStorage.getItem(STORAGE_KEY)
-            const currentSaved: Opportunity[] = localSaved ? JSON.parse(localSaved) : []
-            const updated = [
-              dbAssigned,
-              ...currentSaved.filter((o) => o.id !== newOpPayload.id && o.id !== dbAssigned.id),
-            ]
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-            window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
-          } catch {}
-        }
-      } catch (err) {
-        console.warn('Notice calling createOpportunityAction:', err)
+      // STRICT BLOCK: If backend returned error or didn't create opportunity, do not allow posting!
+      if (!res || res.error || !res.opportunity) {
+        setCreateFormError(
+          res?.error || 'Event manager name or Employee ID does not match records in the database. Event posting rejected.'
+        )
+        return
+      }
+
+      // 5. SUCCESS: Add to state, update localStorage, and close modal
+      const createdOp: Opportunity = {
+        id: res.opportunity.id,
+        title: res.opportunity.title || newTitle.trim(),
+        organization: res.opportunity.organization || orgName,
+        organizationId: res.opportunity.organizationId || userId || '',
+        isVerifiedOrg: true,
+        orgStatus: 'approved',
+        category: res.opportunity.category || newCategory,
+        location: res.opportunity.location || location,
+        address: res.opportunity.address || fullAddress,
+        managerName: res.opportunity.managerName || managerName,
+        managerPhone: res.opportunity.managerPhone || managerPhone,
+        eventManagers: res.opportunity.eventManagers || validManagers,
+        assignedEmployeeIds,
+        isRemote: newIsRemote,
+        date: res.opportunity.date || formattedDate,
+        time: res.opportunity.time || formattedTime,
+        spotsLeft: res.opportunity.spotsLeft ?? computedSpotsLeft,
+        totalRequired: res.opportunity.totalRequired ?? totalReq,
+        alreadyRegistered: res.opportunity.alreadyRegistered ?? alreadyReg,
+        skillsNeeded: res.opportunity.skillsNeeded || skillsNeeded,
+        description: res.opportunity.description || newDescription.trim(),
+      }
+
+      setOpportunities((prev) => [
+        createdOp,
+        ...prev.filter((o) => o.id !== createdOp.id),
+      ])
+
+      try {
+        const localSaved = localStorage.getItem(STORAGE_KEY)
+        const currentSaved: Opportunity[] = localSaved ? JSON.parse(localSaved) : []
+        const updated = [
+          createdOp,
+          ...currentSaved.filter((o) => o.id !== createdOp.id),
+        ]
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+        window.dispatchEvent(new CustomEvent('togethernow_opportunities_updated', { detail: updated }))
+      } catch (storageErr) {
+        console.warn('Notice saving opportunity to localStorage:', storageErr)
       }
 
       setShowCreateModal(false)
@@ -1581,13 +1655,15 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       setNewDescription('')
       setNewLocation('')
       setNewAddress('')
-      setEventManagers([{ name: '', phone: '', employeeId: 'EM101' }])
+      setEventManagers([{ name: '', phone: '', employeeId: '' }])
       setNewSkills('')
       setNewDate('')
       setNewStartTime('09:00')
       setNewEndTime('13:00')
       setNewTotalRequired(15)
       setNewAlreadyRegistered(0)
+      setManagerValidationErrors([])
+      setCreateFormError(null)
     }
 
     // Filtering logic
@@ -3250,6 +3326,61 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                     </div>
                   </div>
 
+                  {/* Registered Database Employees Picker */}
+                  {availableOrgEmployees.length > 0 ? (
+                    <div className="p-3 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/70 dark:border-indigo-800/60 mb-1">
+                      <div className="flex items-center justify-between text-xs font-bold text-indigo-900 dark:text-indigo-200 mb-2">
+                        <span className="flex items-center gap-1.5">
+                          <Users className="w-4 h-4 text-indigo-600" />
+                          <span>Registered Employees in Database ({availableOrgEmployees.length}):</span>
+                        </span>
+                        <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold">
+                          Click employee to assign
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {availableOrgEmployees.map((emp) => (
+                          <button
+                            key={emp.id}
+                            type="button"
+                            onClick={() => {
+                              setEventManagers((prev) => {
+                                const copy = [...prev]
+                                const emptyIdx = copy.findIndex((m) => !m.name.trim() && !m.employeeId.trim())
+                                const targetIdx = emptyIdx >= 0 ? emptyIdx : 0
+                                copy[targetIdx] = {
+                                  name: emp.name,
+                                  phone: emp.phone || '+91 98201 44521',
+                                  employeeId: emp.employeeId,
+                                }
+                                return copy
+                              })
+                              setManagerValidationErrors([])
+                              setCreateFormError(null)
+                            }}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-gray-900 border border-indigo-200 dark:border-indigo-700 text-indigo-800 dark:text-indigo-200 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 dark:hover:text-white transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
+                            title={`Click to assign ${emp.name} (${emp.employeeId})`}
+                          >
+                            <span>{emp.name}</span>
+                            <span className="px-1.5 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-800/80 text-[10px] font-mono font-extrabold uppercase">
+                              {emp.employeeId}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5 mb-1">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold m-0 text-amber-950 dark:text-amber-100">No Employees Found in Database</p>
+                        <p className="m-0 mt-1 text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                          Your organization has no registered employees in the database. You must add employees in the <strong>Organization Employees</strong> section before you can post an event.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* List of each event manager */}
                   <div className="space-y-3">
                     {eventManagers.map((mgr, index) => (
@@ -3281,24 +3412,203 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                          <div>
-                            <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                              Manager Name *
-                            </label>
-                            <input
-                              type="text"
-                              required
-                              value={mgr.name}
-                              onChange={(e) => handleUpdateManager(index, 'name', e.target.value)}
-                              placeholder={index === 0 ? "e.g. Arjun Nambiar" : `e.g. Manager ${index + 1} Name`}
-                              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/60 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                            />
+                          {/* Manager Name with Searchable Dropdown */}
+                          <div className="relative manager-select-container">
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300">
+                                Manager Name *
+                              </label>
+                              {mgr.name && availableOrgEmployees.some(e => e.employeeId.toUpperCase() === mgr.employeeId.toUpperCase() && e.name.toLowerCase().trim() === mgr.name.toLowerCase().trim()) && (
+                                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                                  <CheckCircle2 className="w-3 h-3" /> Auto-filled
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="relative">
+                              <input
+                                type="text"
+                                required
+                                value={mgr.name}
+                                onClick={() => {
+                                  setOpenManagerDropdownIndex(openManagerDropdownIndex === index ? null : index)
+                                  setManagerSearchTerm('')
+                                }}
+                                onChange={(e) => {
+                                  handleUpdateManager(index, 'name', e.target.value)
+                                  setManagerValidationErrors((prev) => prev.filter((r) => r.index !== index))
+                                  setCreateFormError(null)
+                                }}
+                                placeholder={availableOrgEmployees.length > 0 ? "Select or search employee..." : "Registered employee name"}
+                                className={`w-full pl-3 pr-8 py-2 rounded-xl border bg-gray-50/60 dark:bg-gray-900/60 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer ${
+                                  managerValidationErrors.find((r) => r.index === index)
+                                    ? 'border-rose-400 dark:border-rose-600 ring-1 ring-rose-400/40'
+                                    : 'border-gray-200 dark:border-gray-700'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenManagerDropdownIndex(openManagerDropdownIndex === index ? null : index)
+                                  setManagerSearchTerm('')
+                                }}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 bg-transparent border-none cursor-pointer"
+                                title="Open employee dropdown list"
+                              >
+                                <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${openManagerDropdownIndex === index ? 'rotate-180 text-indigo-600' : ''}`} />
+                              </button>
+                            </div>
+
+                            {/* Searchable Dropdown Popover */}
+                            {openManagerDropdownIndex === index && (
+                              <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[280px] sm:min-w-[340px]">
+                                {/* Search input inside dropdown */}
+                                <div className="p-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-800/80">
+                                  <div className="relative">
+                                    <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                    <input
+                                      type="text"
+                                      autoFocus
+                                      value={managerSearchTerm}
+                                      onChange={(e) => setManagerSearchTerm(e.target.value)}
+                                      placeholder="Search by name, employee ID, role..."
+                                      className="w-full pl-8 pr-7 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 text-xs bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-400"
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                    {managerSearchTerm && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          setManagerSearchTerm('')
+                                        }}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-0.5 bg-transparent border-none cursor-pointer"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Filtered employee records */}
+                                <div className="max-h-56 overflow-y-auto p-1.5 space-y-1">
+                                  {availableOrgEmployees
+                                    .filter((emp) => {
+                                      const q = managerSearchTerm.toLowerCase().trim()
+                                      if (!q) return true
+                                      return (
+                                        emp.name.toLowerCase().includes(q) ||
+                                        emp.employeeId.toLowerCase().includes(q) ||
+                                        (emp.roleTitle && emp.roleTitle.toLowerCase().includes(q)) ||
+                                        (emp.phone && emp.phone.includes(q))
+                                      )
+                                    })
+                                    .map((emp) => {
+                                      const isSelected = mgr.employeeId.toUpperCase() === emp.employeeId.toUpperCase()
+                                      return (
+                                        <div
+                                          key={emp.id}
+                                          onClick={() => {
+                                            // AUTO-FILL Name, Employee ID, and Phone
+                                            setEventManagers((prev) => {
+                                              const copy = [...prev]
+                                              copy[index] = {
+                                                name: emp.name,
+                                                phone: emp.phone || '+91 98201 44521',
+                                                employeeId: emp.employeeId,
+                                              }
+                                              return copy
+                                            })
+                                            setManagerValidationErrors((prev) => prev.filter((r) => r.index !== index))
+                                            setCreateFormError(null)
+                                            setOpenManagerDropdownIndex(null)
+                                            setManagerSearchTerm('')
+                                          }}
+                                          className={`p-2.5 rounded-xl cursor-pointer text-xs flex items-center justify-between transition-colors ${
+                                            isSelected
+                                              ? 'bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-indigo-950 dark:text-indigo-100'
+                                              : 'hover:bg-gray-100 dark:hover:bg-gray-800/80 text-gray-800 dark:text-gray-200'
+                                          }`}
+                                        >
+                                          <div className="min-w-0 pr-2">
+                                            <div className="flex items-center gap-2">
+                                              <span className="font-bold text-gray-900 dark:text-white">
+                                                {emp.name}
+                                              </span>
+                                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-extrabold bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 uppercase">
+                                                {emp.employeeId}
+                                              </span>
+                                            </div>
+                                            <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-2">
+                                              <span>{emp.roleTitle || 'Event Manager'}</span>
+                                              {emp.phone && <span>• {emp.phone}</span>}
+                                            </div>
+                                          </div>
+                                          {isSelected ? (
+                                            <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/60 px-2 py-0.5 rounded-full shrink-0">
+                                              <Check className="w-3 h-3" /> Selected
+                                            </span>
+                                          ) : (
+                                            <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold opacity-0 group-hover:opacity-100 shrink-0">
+                                              Select & Auto-fill →
+                                            </span>
+                                          )}
+                                        </div>
+                                      )
+                                    })}
+
+                                  {availableOrgEmployees.filter((emp) => {
+                                    const q = managerSearchTerm.toLowerCase().trim()
+                                    if (!q) return true
+                                    return (
+                                      emp.name.toLowerCase().includes(q) ||
+                                      emp.employeeId.toLowerCase().includes(q) ||
+                                      (emp.roleTitle && emp.roleTitle.toLowerCase().includes(q)) ||
+                                      (emp.phone && emp.phone.includes(q))
+                                    )
+                                  }).length === 0 && (
+                                    <div className="p-4 text-center">
+                                      <p className="text-xs text-gray-500 dark:text-gray-400 m-0 font-medium">
+                                        No matching employee records found for "{managerSearchTerm}".
+                                      </p>
+                                      <p className="text-[11px] text-gray-400 dark:text-gray-500 m-0 mt-1">
+                                        Register employees in the Employee Management panel to see them here.
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="p-2 border-t border-gray-100 dark:border-gray-800 bg-gray-50/40 dark:bg-gray-800/60 flex items-center justify-between text-[11px] text-gray-500">
+                                  <span className="text-[10px] text-gray-400">
+                                    Selecting auto-fills Name, Phone & ID
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenManagerDropdownIndex(null)
+                                      setManagerSearchTerm('')
+                                    }}
+                                    className="text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                                  >
+                                    Done
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
 
+                          {/* Manager Phone Number */}
                           <div>
-                            <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                              Manager Phone Number *
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300">
+                                Manager Phone Number *
+                              </label>
+                              {mgr.phone && availableOrgEmployees.some(e => e.employeeId.toUpperCase() === mgr.employeeId.toUpperCase() && e.phone === mgr.phone) && (
+                                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                                  Auto-filled
+                                </span>
+                              )}
+                            </div>
                             <input
                               type="tel"
                               required
@@ -3309,20 +3619,44 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                             />
                           </div>
 
+                          {/* Employee ID */}
                           <div>
-                            <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                              Employee ID / Code *
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300">
+                                Employee ID / Code *
+                              </label>
+                              {mgr.employeeId && availableOrgEmployees.some(e => e.employeeId.toUpperCase() === mgr.employeeId.toUpperCase()) && (
+                                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                                  Auto-filled
+                                </span>
+                              )}
+                            </div>
                             <input
                               type="text"
                               required
                               value={mgr.employeeId}
-                              onChange={(e) => handleUpdateManager(index, 'employeeId', e.target.value.toUpperCase())}
-                              placeholder={`e.g. EM10${index + 1}`}
-                              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/60 font-mono font-bold text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase"
+                              onChange={(e) => {
+                                handleUpdateManager(index, 'employeeId', e.target.value.toUpperCase())
+                                setManagerValidationErrors((prev) => prev.filter((r) => r.index !== index))
+                                setCreateFormError(null)
+                              }}
+                              placeholder="e.g. T-777 or Employee ID"
+                              className={`w-full px-3 py-2 rounded-xl border bg-gray-50/60 dark:bg-gray-900/60 font-mono font-bold text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase ${
+                                managerValidationErrors.find((r) => r.index === index)
+                                  ? 'border-rose-400 dark:border-rose-600 ring-1 ring-rose-400/40'
+                                  : 'border-gray-200 dark:border-gray-700'
+                              }`}
                             />
                           </div>
                         </div>
+
+                        {/* Inline validation error for this manager */}
+                        {managerValidationErrors.find((r) => r.index === index) && (
+                          <div className="mt-2 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/50 text-[11px] text-rose-700 dark:text-rose-300 flex items-start gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
+                            <span>{managerValidationErrors.find((r) => r.index === index)?.error}</span>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -3408,6 +3742,41 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                       />
                     </div>
                   </div>
+
+                  {/* Live Spots Summary */}
+                  <div className="pt-2 border-t border-emerald-200/60 dark:border-emerald-800/40">
+                    <div className="flex items-center justify-between text-[11px] font-semibold mb-1">
+                      <span className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
+                        <Users className="w-3 h-3 text-emerald-600" />
+                        <span>
+                          {Math.max(0, Number(newAlreadyRegistered) || 0)} / {Math.max(1, Number(newTotalRequired) || 1)} Registered
+                        </span>
+                      </span>
+                      <span className={`font-extrabold ${
+                        (Math.max(1, Number(newTotalRequired) || 1) - Math.max(0, Number(newAlreadyRegistered) || 0)) <= 0
+                          ? 'text-rose-600'
+                          : (Math.max(1, Number(newTotalRequired) || 1) - Math.max(0, Number(newAlreadyRegistered) || 0)) <= 3
+                          ? 'text-amber-600'
+                          : 'text-emerald-600'
+                      }`}>
+                        {Math.max(0, Math.max(1, Number(newTotalRequired) || 1) - Math.max(0, Number(newAlreadyRegistered) || 0))} spot{Math.max(0, Math.max(1, Number(newTotalRequired) || 1) - Math.max(0, Number(newAlreadyRegistered) || 0)) !== 1 ? 's' : ''} available
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          (Math.max(1, Number(newTotalRequired) || 1) - Math.max(0, Number(newAlreadyRegistered) || 0)) <= 0
+                            ? 'bg-rose-500'
+                            : (Math.max(1, Number(newTotalRequired) || 1) - Math.max(0, Number(newAlreadyRegistered) || 0)) <= 3
+                            ? 'bg-amber-500'
+                            : 'bg-emerald-500'
+                        }`}
+                        style={{
+                          width: `${Math.min(100, Math.round((Math.max(0, Number(newAlreadyRegistered) || 0) / Math.max(1, Number(newTotalRequired) || 1)) * 100))}%`
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div>
@@ -3437,6 +3806,17 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                   />
                 </div>
 
+                {/* Global form error banner */}
+                {createFormError && (
+                  <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/50 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="m-0 font-bold">Event Manager Validation Failed</p>
+                      <p className="m-0 mt-0.5 text-[11px] text-rose-600 dark:text-rose-400">{createFormError}</p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="pt-2 flex items-center justify-end gap-2">
                   <button
                     type="button"
@@ -3447,10 +3827,20 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md border-none cursor-pointer flex items-center gap-1.5"
+                    disabled={isValidatingManagers}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-xs shadow-md border-none cursor-pointer flex items-center gap-1.5"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>Publish Opportunity</span>
+                    {isValidatingManagers ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                        <span>Validating Managers...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4" />
+                        <span>Publish Opportunity</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>

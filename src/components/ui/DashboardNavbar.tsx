@@ -167,11 +167,11 @@ export default function DashboardNavbar({
             </button>
 
             <a
-              href="#opportunities-feed"
+              href={role === 'donor' ? '#donor-campaigns' : '#opportunities-feed'}
               className="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-gray-800 text-decoration-none transition-all"
             >
               <Calendar className="w-4 h-4 text-gray-500" />
-              <span>Events & Opportunities</span>
+              <span>{role === 'donor' ? 'Campaigns & Causes' : 'Events & Opportunities'}</span>
             </a>
 
             {role === 'volunteer' && (

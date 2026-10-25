@@ -141,6 +141,58 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   const adminClient = createAdminClient(supabaseUrl, serviceKey)
 
+  // ── STRICT SERVER-SIDE VALIDATION: Verify Event Manager matches database records ──
+  const managersToValidate = (input.eventManagers && input.eventManagers.length > 0)
+    ? input.eventManagers
+    : [{ name: input.managerName || '', employeeId: input.assignedEmployeeIds?.[0] || '', phone: input.managerPhone || '' }]
+
+  const { data: dbEmployees, error: dbEmpErr } = await adminClient
+    .from('organization_employees')
+    .select('employee_id, name, is_active')
+    .eq('organization_id', user.id)
+    .eq('is_active', true)
+
+  if (dbEmpErr || !dbEmployees || dbEmployees.length === 0) {
+    return {
+      error: 'Cannot post event: No registered employees found in the database for your organization. Please register event managers in your Employee Management panel before creating an event.',
+    }
+  }
+
+  const empMap = new Map<string, string>() // UPPERCASE employee_id -> registered name
+  dbEmployees.forEach((e: any) => {
+    if (e.employee_id && e.name) {
+      empMap.set(e.employee_id.trim().toUpperCase(), e.name.trim())
+    }
+  })
+
+  for (const mgr of managersToValidate) {
+    const cleanCode = (mgr.employeeId || '').trim().toUpperCase()
+    const cleanName = (mgr.name || '').trim()
+
+    if (!cleanCode) {
+      return { error: 'Cannot post event: Employee ID is missing for event manager.' }
+    }
+    if (!cleanName) {
+      return { error: 'Cannot post event: Event manager name is missing.' }
+    }
+
+    const registeredName = empMap.get(cleanCode)
+    if (!registeredName) {
+      return {
+        error: `Cannot post event: Employee ID "${cleanCode}" was not found in your organization's employee database. Please register this employee first.`,
+      }
+    }
+
+    const normRegistered = registeredName.toLowerCase().replace(/\s+/g, ' ').trim()
+    const normInput = cleanName.toLowerCase().replace(/\s+/g, ' ').trim()
+
+    if (normRegistered !== normInput) {
+      return {
+        error: `Cannot post event: Event manager name "${cleanName}" does not match the database record for Employee ID "${cleanCode}". The registered name in the database is "${registeredName}".`,
+      }
+    }
+  }
+
   const newRow = {
     organization_id: user.id,
     organization_name: orgName,
@@ -159,6 +211,8 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
     description: injectMetadataIntoDescription(input.description.trim(), {
       assignedEmployeeIds: input.assignedEmployeeIds || [],
       eventManagers: input.eventManagers || [],
+      totalRequired: input.totalRequired,
+      initialAlreadyRegistered: input.alreadyRegistered ?? 0,
     }),
   }
 
@@ -306,10 +360,13 @@ export async function fetchOpportunitiesAction(): Promise<DbOpportunityOutput[]>
     return dbOps.map((op) => {
       const { cleanDescription, meta } = extractMetadataFromDescription(op.description)
       const status = (op.organization_id ? orgStatusMap.get(op.organization_id) : 'approved') || 'approved'
-      const alreadyRegistered = acceptedCountByOpId.get(op.id) || 0
+      const dbApplicationsCount = acceptedCountByOpId.get(op.id) || 0
+      const initialRegistered = typeof meta.initialAlreadyRegistered === 'number' ? meta.initialAlreadyRegistered : 0
+      const alreadyRegistered = initialRegistered + dbApplicationsCount
+      const metaTotalRequired = typeof meta.totalRequired === 'number' ? meta.totalRequired : undefined
       const storedSpotsLeft = typeof op.spots_left === 'number' ? op.spots_left : 10
-      const totalRequired = Math.max(10, alreadyRegistered + storedSpotsLeft)
-      const computedSpotsLeft = Math.max(0, storedSpotsLeft)
+      const totalRequired = metaTotalRequired ?? Math.max(1, alreadyRegistered + storedSpotsLeft)
+      const computedSpotsLeft = Math.max(0, totalRequired - alreadyRegistered)
 
       // Prefer the real org name from profiles; fall back to stored organization_name
       // Only use the stored value if it isn't the generic 'Organization' default

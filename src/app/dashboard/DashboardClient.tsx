@@ -5,7 +5,7 @@ import DashboardNavbar from '@/components/ui/DashboardNavbar'
 import ProfilePromptBanner from '@/components/ui/ProfilePromptBanner'
 import VolunteerDashboard from '@/components/ui/VolunteerDashboard'
 import OrganizationDashboard from '@/components/ui/OrganizationDashboard'
-import DonorDashboard from '@/components/ui/DonorDashboard'
+import DonorDashboard, { DonorDashboardRef } from '@/components/ui/DonorDashboard'
 import OrgFundraisingPanel from '@/components/ui/OrgFundraisingPanel'
 import OrgEmployeesPanel from '@/components/ui/OrgEmployeesPanel'
 import { OpportunitiesFeedRef } from '@/components/ui/OpportunitiesFeed'
@@ -66,6 +66,7 @@ export default function DashboardClient({
   avatarUrl,
 }: DashboardClientProps) {
   const opportunitiesRef = useRef<OpportunitiesFeedRef | null>(null)
+  const donorRef = useRef<DonorDashboardRef | null>(null)
   const [showProfileModal, setShowProfileModal] = useState(false)
 
   const fullName = user.user_metadata?.full_name ?? user.email ?? 'Friend'
@@ -77,7 +78,11 @@ export default function DashboardClient({
   const organizationName = orgNameFromDb || fullName
 
   const handleSearchClick = () => {
-    opportunitiesRef.current?.focusSearch()
+    if (role === 'donor') {
+      donorRef.current?.focusSearch()
+    } else {
+      opportunitiesRef.current?.focusSearch()
+    }
   }
 
   const handlePostOpportunityClick = () => {
@@ -210,6 +215,7 @@ export default function DashboardClient({
           </>
         ) : role === 'donor' ? (
           <DonorDashboard
+            ref={donorRef}
             userId={user.id}
             userEmail={user.email || ''}
             userName={fullName}
