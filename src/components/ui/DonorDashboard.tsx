@@ -1,8 +1,10 @@
 'use client'
 
 import React, { useState, useActionState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
-import { Heart, TrendingUp, Users, Target, Calendar, X, ChevronRight, Wallet, AlertCircle, CheckCircle2, Building2, Sparkles, Search, Filter } from 'lucide-react'
+import { Heart, TrendingUp, Users, Target, Calendar, X, ChevronRight, Wallet, AlertCircle, CheckCircle2, Building2, Sparkles, Search, Filter, Camera, User } from 'lucide-react'
 import { makeDonationAction } from '@/app/actions/donations'
+import VolunteerPhotoUploadModal from './VolunteerPhotoUploadModal'
+import ProfileCompletionModal from './ProfileCompletionModal'
 
 interface DonationRequest {
   id: string
@@ -387,7 +389,28 @@ const DonorDashboard = forwardRef<DonorDashboardRef, DonorDashboardProps>(functi
   const [selectedCampaign, setSelectedCampaign] = useState<DonationRequest | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('All')
+  const [avatarUrl, setAvatarUrl] = useState<string>('')
+  const [showPhotoModal, setShowPhotoModal] = useState(false)
+  const [showProfileModal, setShowProfileModal] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const refreshAvatar = (e?: any) => {
+      if (e?.detail) {
+        setAvatarUrl(e.detail)
+      } else if (userEmail) {
+        const stored = localStorage.getItem(`togethernow_user_avatar_${userEmail}`)
+        if (stored) setAvatarUrl(stored)
+      }
+    }
+    refreshAvatar()
+    window.addEventListener('togethernow_avatar_updated', refreshAvatar)
+    window.addEventListener('storage', refreshAvatar)
+    return () => {
+      window.removeEventListener('togethernow_avatar_updated', refreshAvatar)
+      window.removeEventListener('storage', refreshAvatar)
+    }
+  }, [userEmail])
 
   useImperativeHandle(ref, () => ({
     focusSearch: () => {
@@ -428,6 +451,67 @@ const DonorDashboard = forwardRef<DonorDashboardRef, DonorDashboardProps>(functi
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+
+      {/* Donor Profile & Photo Action Card */}
+      <div className="bg-white dark:bg-gray-900 rounded-3xl p-5 sm:p-6 border border-gray-100 dark:border-gray-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="relative group shrink-0">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full overflow-hidden ring-3 ring-amber-400/50 shadow-md bg-gradient-to-br from-amber-500 to-orange-600 text-white flex items-center justify-center font-black text-xl">
+              {avatarUrl ? (
+                <img src={avatarUrl} alt={userName} className="w-full h-full object-cover" />
+              ) : (
+                <span>{userName ? userName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() : 'D'}</span>
+              )}
+            </div>
+            <button
+              type="button"
+              id="donor-avatar-btn"
+              onClick={() => setShowPhotoModal(true)}
+              className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white shadow-md border-2 border-white dark:border-gray-900 cursor-pointer transition-transform hover:scale-110"
+              title="Update Profile Picture"
+            >
+              <Camera className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-base sm:text-lg font-black text-gray-900 dark:text-white m-0">
+                {userName}
+              </h3>
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-xs font-bold border border-amber-200 dark:border-amber-900/60 flex items-center gap-1">
+                <span>💛</span>
+                <span>Verified Donor</span>
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 m-0">
+              {userEmail} • Contributing directly to grassroots change
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+          <button
+            type="button"
+            id="donor-update-photo-btn"
+            onClick={() => setShowPhotoModal(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-900 dark:text-amber-200 text-xs font-bold transition-all border border-amber-200 dark:border-amber-800 cursor-pointer"
+          >
+            <Camera className="w-3.5 h-3.5 text-amber-600" />
+            <span>Update Photo</span>
+          </button>
+
+          <button
+            type="button"
+            id="donor-edit-profile-btn"
+            onClick={() => setShowProfileModal(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-xs font-extrabold shadow-xs transition-all border-none cursor-pointer"
+          >
+            <User className="w-3.5 h-3.5" />
+            <span>Edit Profile</span>
+          </button>
+        </div>
+      </div>
 
       {/* Stats Bar */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px' }}>
@@ -673,6 +757,24 @@ const DonorDashboard = forwardRef<DonorDashboardRef, DonorDashboardProps>(functi
           onClose={() => setSelectedCampaign(null)}
         />
       )}
+
+      {/* Donor Profile Photo Upload Modal */}
+      <VolunteerPhotoUploadModal
+        isOpen={showPhotoModal}
+        onClose={() => setShowPhotoModal(false)}
+        userEmail={userEmail}
+        currentAvatarUrl={avatarUrl}
+        onUploadSuccess={(url) => setAvatarUrl(url)}
+      />
+
+      {/* Donor Edit Profile Modal */}
+      <ProfileCompletionModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        userEmail={userEmail}
+        userName={userName}
+        userRole="donor"
+      />
     </div>
   )
 })

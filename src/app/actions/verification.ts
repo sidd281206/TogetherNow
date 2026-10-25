@@ -312,6 +312,19 @@ export async function saveCompleteUserProfileAction(input: SaveProfileInput): Pr
       } catch (err) {
         console.warn('Notice updating organizations table:', err)
       }
+    } else if (role === 'donor') {
+      try {
+        await adminClient.from('donor_profiles').upsert({
+          id: user.id,
+          phone: input.phone.trim(),
+          address: fullAddress,
+          city: input.city.trim(),
+          pincode: input.pincode || '',
+          email_verified: true,
+        })
+      } catch (err) {
+        console.warn('Notice updating donor_profiles table:', err)
+      }
     }
 
     revalidatePath('/dashboard')

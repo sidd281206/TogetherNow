@@ -189,10 +189,16 @@ export default function ProfileCompletionModal({
   const hasInterests = interests.trim().length > 0
 
   let completion = 0
-  if (hasSkills || hasInterests) completion += 30
-  if (hasPhone) completion += 25
-  if (hasCity) completion += 25
-  if (isEmailVerified || hasAddress) completion += 20
+  if (userRole === 'donor') {
+    if (hasPhone) completion += 35
+    if (hasCity) completion += 35
+    if (isEmailVerified || hasAddress) completion += 30
+  } else {
+    if (hasSkills || hasInterests) completion += 30
+    if (hasPhone) completion += 25
+    if (hasCity) completion += 25
+    if (isEmailVerified || hasAddress) completion += 20
+  }
   const readinessPercent = Math.min(100, completion)
 
   const handleSendOtp = async () => {
@@ -409,7 +415,9 @@ export default function ProfileCompletionModal({
                   )}
                 </div>
                 <p className="text-xs text-gray-600 dark:text-gray-300 m-0">
-                  Visible to organizations and drive managers for roster check-in &amp; attendance verification.
+                  {userRole === 'donor'
+                    ? 'Visible on community impact acknowledgements and donation receipts.'
+                    : 'Visible to organizations and drive managers for roster check-in & attendance verification.'}
                 </p>
               </div>
             </div>
@@ -600,15 +608,17 @@ export default function ProfileCompletionModal({
             <div className="flex items-center justify-between">
               <label className="text-xs font-extrabold text-purple-950 dark:text-purple-200 flex items-center gap-1.5">
                 <Heart className="w-4 h-4 text-purple-600" />
-                <span>3. Volunteer Interests & Causes *</span>
+                <span>{userRole === 'donor' ? '3. Causes You Support & Back *' : '3. Volunteer Interests & Causes *'}</span>
               </label>
               <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300">
-                Matches Event Mission
+                {userRole === 'donor' ? 'Campaign Recommendations' : 'Matches Event Mission'}
               </span>
             </div>
 
             <p className="text-[11px] text-purple-800/80 dark:text-purple-300/80 m-0">
-              For example, if your interest includes <strong>Photography</strong>, the system recommends Photography drives at NGOs in your city.
+              {userRole === 'donor'
+                ? 'Select causes you are passionate about to discover matching community fundraising campaigns.'
+                : 'For example, if your interest includes Photography, the system recommends Photography drives at NGOs in your city.'}
             </p>
 
             <input
@@ -645,82 +655,86 @@ export default function ProfileCompletionModal({
             </div>
           </div>
 
-          {/* SECTION 4: VOLUNTEERING SKILLS */}
-          <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200/80 dark:border-teal-900/60 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-extrabold text-teal-950 dark:text-teal-200 flex items-center gap-1.5">
-                <Wrench className="w-4 h-4 text-teal-600" />
-                <span>4. Volunteer Skills & Talents *</span>
-              </label>
-              <span className="text-[10px] font-bold text-teal-700 dark:text-teal-300">
-                Matches Skills Needed
-              </span>
-            </div>
-
-            <p className="text-[11px] text-teal-800/80 dark:text-teal-300/80 m-0">
-              NGOs look for specific skills like <strong>Photography</strong>, <strong>Photo Editing</strong>, <strong>Mentorship</strong>, etc.
-            </p>
-
-            <input
-              type="text"
-              required
-              value={skills}
-              onChange={(e) => setSkills(e.target.value)}
-              placeholder="e.g. Photography, Photo Editing, Mentorship, Teamwork"
-              className="w-full px-3.5 py-2 text-xs rounded-xl border border-teal-200 dark:border-teal-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
-            />
-
-            {/* Quick Toggle Chips for Skills */}
-            <div className="flex items-center gap-1.5 flex-wrap pt-1">
-              <span className="text-[10px] font-bold text-gray-400">Click to add/remove:</span>
-              {SUGGESTED_SKILLS.map((sk) => {
-                const active = isItemInList(skills, sk)
-                return (
-                  <button
-                    key={sk}
-                    type="button"
-                    onClick={() => toggleItemInList(skills, sk, setSkills)}
-                    className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all cursor-pointer border flex items-center gap-1 ${
-                      active
-                        ? 'bg-teal-600 text-white border-teal-600 shadow-2xs'
-                        : 'bg-white dark:bg-gray-900 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800/70 hover:bg-teal-50'
-                    }`}
-                  >
-                    <span>{sk === 'Photography' ? '📸' : sk === 'Photo Editing' ? '🎞' : sk === 'Social Media' ? '📱' : sk === 'Coding' ? '💻' : '🛠'}</span>
-                    <span>{sk}</span>
-                    {active && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* SECTION 5: AVAILABILITY */}
-          <div className="p-3.5 rounded-2xl bg-gray-50/70 dark:bg-gray-800/60 border border-gray-200/80 dark:border-gray-700/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-emerald-600" />
-              <div>
-                <span className="text-xs font-bold text-gray-900 dark:text-white block">
-                  Volunteering Availability
-                </span>
-                <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                  When are you generally free to attend drives?
+          {/* SECTION 4: VOLUNTEERING SKILLS (VOLUNTEERS ONLY) */}
+          {userRole !== 'donor' && (
+            <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200/80 dark:border-teal-900/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-extrabold text-teal-950 dark:text-teal-200 flex items-center gap-1.5">
+                  <Wrench className="w-4 h-4 text-teal-600" />
+                  <span>4. Volunteer Skills & Talents *</span>
+                </label>
+                <span className="text-[10px] font-bold text-teal-700 dark:text-teal-300">
+                  Matches Skills Needed
                 </span>
               </div>
-            </div>
 
-            <select
-              value={availability}
-              onChange={(e) => setAvailability(e.target.value)}
-              className="px-3 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
-            >
-              <option value="weekends">Weekends Only</option>
-              <option value="weekdays">Weekdays</option>
-              <option value="mornings">Mornings</option>
-              <option value="evenings">Evenings</option>
-              <option value="flexible">Flexible / Anytime</option>
-            </select>
-          </div>
+              <p className="text-[11px] text-teal-800/80 dark:text-teal-300/80 m-0">
+                NGOs look for specific skills like <strong>Photography</strong>, <strong>Photo Editing</strong>, <strong>Mentorship</strong>, etc.
+              </p>
+
+              <input
+                type="text"
+                required
+                value={skills}
+                onChange={(e) => setSkills(e.target.value)}
+                placeholder="e.g. Photography, Photo Editing, Mentorship, Teamwork"
+                className="w-full px-3.5 py-2 text-xs rounded-xl border border-teal-200 dark:border-teal-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
+              />
+
+              {/* Quick Toggle Chips for Skills */}
+              <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                <span className="text-[10px] font-bold text-gray-400">Click to add/remove:</span>
+                {SUGGESTED_SKILLS.map((sk) => {
+                  const active = isItemInList(skills, sk)
+                  return (
+                    <button
+                      key={sk}
+                      type="button"
+                      onClick={() => toggleItemInList(skills, sk, setSkills)}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all cursor-pointer border flex items-center gap-1 ${
+                        active
+                          ? 'bg-teal-600 text-white border-teal-600 shadow-2xs'
+                          : 'bg-white dark:bg-gray-900 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800/70 hover:bg-teal-50'
+                      }`}
+                    >
+                      <span>{sk === 'Photography' ? '📸' : sk === 'Photo Editing' ? '🎞' : sk === 'Social Media' ? '📱' : sk === 'Coding' ? '💻' : '🛠'}</span>
+                      <span>{sk}</span>
+                      {active && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* SECTION 5: VOLUNTEERING AVAILABILITY DAYS (REMOVED FOR DONORS) */}
+          {userRole !== 'donor' && (
+            <div className="p-3.5 rounded-2xl bg-gray-50/70 dark:bg-gray-800/60 border border-gray-200/80 dark:border-gray-700/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-600" />
+                <div>
+                  <span className="text-xs font-bold text-gray-900 dark:text-white block">
+                    Volunteering Availability
+                  </span>
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    When are you generally free to attend drives?
+                  </span>
+                </div>
+              </div>
+
+              <select
+                value={availability}
+                onChange={(e) => setAvailability(e.target.value)}
+                className="px-3 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
+              >
+                <option value="weekends">Weekends Only</option>
+                <option value="weekdays">Weekdays</option>
+                <option value="mornings">Mornings</option>
+                <option value="evenings">Evenings</option>
+                <option value="flexible">Flexible / Anytime</option>
+              </select>
+            </div>
+          )}
 
           {/* Modal Actions */}
           <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">

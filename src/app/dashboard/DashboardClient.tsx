@@ -154,6 +154,19 @@ export default function DashboardClient({
             </button>
           )}
 
+          {/* Quick Profile Edit for Donors */}
+          {role === 'donor' && (
+            <button
+              type="button"
+              onClick={() => setShowProfileModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 dark:text-amber-200 text-xs font-bold transition-all border border-amber-200/80 dark:border-amber-800 shadow-2xs cursor-pointer group"
+              title="Edit your contact details, city, and donor profile"
+            >
+              <User className="w-4 h-4 text-amber-600 group-hover:scale-110 transition-transform" />
+              <span>Edit Profile</span>
+            </button>
+          )}
+
           {/* Quick Raise Funds Action for Organizations */}
           {role === 'organization' && (
             <button
@@ -260,14 +273,14 @@ export default function DashboardClient({
 
       </main>
 
-      {/* Global Volunteer Profile & Preferences Modal */}
-      {showProfileModal && role === 'volunteer' && (
+      {/* Global Profile & Preferences Modal */}
+      {showProfileModal && (role === 'volunteer' || role === 'donor') && (
         <ProfileCompletionModal
           isOpen={showProfileModal}
           onClose={() => setShowProfileModal(false)}
           userEmail={user.email}
           userName={fullName}
-          userRole="volunteer"
+          userRole={role}
           initialCity={volunteerPreferences?.city}
           initialSkills={volunteerPreferences?.skills}
           initialInterests={volunteerPreferences?.interests}
