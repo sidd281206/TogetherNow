@@ -33,6 +33,7 @@ export interface OrganizationProfileData {
   phone: string
   location: string
   address: string
+  upiId?: string
   causes: string[]
   stats: {
     volunteersCount: number
@@ -51,6 +52,7 @@ export interface OrganizationProfileData {
 }
 
 export const ORG_ABOUT_STORAGE_KEY_PREFIX = 'togethernow_org_about_v2_'
+export const ORG_UPI_STORAGE_KEY_PREFIX = 'togethernow_org_upi_'
 
 export const DEFAULT_ORGANIZATION_PROFILES: Record<string, OrganizationProfileData> = {
   'Ocean & Earth Care Alliance': {
@@ -69,6 +71,7 @@ export const DEFAULT_ORGANIZATION_PROFILES: Record<string, OrganizationProfileDa
     phone: '+91 98201 44521',
     location: 'Mumbai, Maharashtra',
     address: 'Gate 2 Promenade, Marine Drive Coastal Stretch, Mumbai 400020',
+    upiId: 'oceanearth@okaxis',
     causes: ['Environment', 'Marine Conservation', 'Waste Management', 'Eco Awareness'],
     stats: {
       volunteersCount: 3450,
@@ -161,6 +164,7 @@ export const DEFAULT_ORGANIZATION_PROFILES: Record<string, OrganizationProfileDa
     phone: '+91 98765 12345',
     location: 'Mumbai, Maharashtra',
     address: '2nd Floor Innovation Hall, Downtown Public Library, Fort, Mumbai 400001',
+    upiId: 'futuretech@okicici',
     causes: ['Education', 'Tech', 'Youth Empowerment', 'STEM'],
     stats: {
       volunteersCount: 1850,
@@ -235,6 +239,7 @@ export const DEFAULT_ORGANIZATION_PROFILES: Record<string, OrganizationProfileDa
     phone: '+91 98111 99887',
     location: 'Mumbai & Thane',
     address: 'Online & Central Operations Hub, Kurla West, Mumbai 400070',
+    upiId: 'nourishhope@okhdfcbank',
     causes: ['Community', 'Crisis Support', 'Food Security', 'Zero Waste'],
     stats: {
       volunteersCount: 4200,
@@ -288,6 +293,7 @@ export const DEFAULT_ORGANIZATION_PROFILES: Record<string, OrganizationProfileDa
     phone: '+91 99887 22334',
     location: 'Dadar, Mumbai',
     address: 'Room 104, Community Wellness Center, Shivaji Park, Dadar, Mumbai 400028',
+    upiId: 'silverconnect@okaxis',
     causes: ['Tech', 'Community', 'Senior Care', 'Digital Inclusion'],
     stats: {
       volunteersCount: 920,
@@ -334,6 +340,7 @@ export const DEFAULT_ORGANIZATION_PROFILES: Record<string, OrganizationProfileDa
     phone: '+91 98222 33445',
     location: 'Mumbai, Maharashtra',
     address: 'Main Entrance Nursery, Northside Botanical Park, Mumbai 400078',
+    upiId: 'greencanopy@icici',
     causes: ['Environment', 'Afforestation', 'Biodiversity', 'Climate Resilience'],
     stats: {
       volunteersCount: 5200,
@@ -474,6 +481,7 @@ export function generateDefaultOrgProfile(orgName: string): OrganizationProfileD
     phone: '+91 98201 55678',
     location: 'Mumbai, Maharashtra',
     address: 'Central Community Office, Mumbai, Maharashtra 400001',
+    upiId: `${safeName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'care.togethernow'}@okaxis`,
     causes: ['Community', 'Education', 'Environment', 'Youth Empowerment'],
     stats: {
       volunteersCount: 450,
@@ -511,3 +519,56 @@ export function generateDefaultOrgProfile(orgName: string): OrganizationProfileD
     ],
   }
 }
+
+/**
+ * Retrieve the configured UPI ID for an organization
+ */
+export function getOrganizationUpiId(orgNameOrId?: string): string {
+  if (!orgNameOrId) return 'oceanearth@okaxis'
+  if (typeof window === 'undefined') return 'oceanearth@okaxis'
+
+  try {
+    // 1. Direct explicit storage key
+    const direct = localStorage.getItem(`${ORG_UPI_STORAGE_KEY_PREFIX}${orgNameOrId}`)
+    if (direct && direct.trim()) return direct.trim()
+
+    // 2. Organization profile from storage or defaults
+    const profile = getOrganizationProfile(orgNameOrId)
+    if (profile && profile.upiId && profile.upiId.trim()) {
+      return profile.upiId.trim()
+    }
+  } catch (e) {
+    // fallback
+  }
+
+  const cleanHandle = orgNameOrId.toLowerCase().replace(/[^a-z0-9]/g, '') || 'togethernow'
+  return `${cleanHandle}@okaxis`
+}
+
+/**
+ * Set and persist the UPI ID for an organization
+ */
+export function setOrganizationUpiId(orgNameOrId: string, upiId: string): void {
+  if (typeof window === 'undefined' || !orgNameOrId) return
+
+  try {
+    const cleanUpi = upiId.trim()
+    localStorage.setItem(`${ORG_UPI_STORAGE_KEY_PREFIX}${orgNameOrId}`, cleanUpi)
+
+    // Also update in organization profile if exists
+    const profile = getOrganizationProfile(orgNameOrId)
+    if (profile) {
+      profile.upiId = cleanUpi
+      saveOrganizationProfile(profile)
+    }
+
+    window.dispatchEvent(
+      new CustomEvent('togethernow_org_upi_updated', {
+        detail: { orgNameOrId, upiId: cleanUpi },
+      })
+    )
+  } catch (e) {
+    console.warn('Error saving organization UPI ID:', e)
+  }
+}
+

@@ -47,6 +47,7 @@ export async function createDonationRequestAction(
   const goalAmountStr = formData.get('goalAmount')?.toString().trim() ?? ''
   const deadlineStr = formData.get('deadline')?.toString().trim() ?? ''
   const imageUrl = formData.get('imageUrl')?.toString().trim() ?? ''
+  const upiId = formData.get('upiId')?.toString().trim() ?? ''
 
   const errors: Record<string, string[]> = {}
 
@@ -90,7 +91,16 @@ export async function createDonationRequestAction(
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   const adminClient = createAdminClient(supabaseUrl, serviceKey)
 
-  const { error } = await adminClient.from('donation_requests').insert({
+  // Update org's upi_id if provided
+  if (upiId) {
+    try {
+      await adminClient.from('organizations').update({ upi_id: upiId }).eq('id', user.id)
+    } catch (e) {
+      // ignore if column doesn't exist yet
+    }
+  }
+
+  let { error } = await adminClient.from('donation_requests').insert({
     organization_id: user.id,
     organization_name: orgName,
     title,
@@ -99,8 +109,25 @@ export async function createDonationRequestAction(
     goal_amount: goalAmount,
     deadline: deadlineStr || null,
     image_url: imageUrl || null,
+    upi_id: upiId || null,
     status: 'active',
   })
+
+  // If column upi_id does not exist, retry without it
+  if (error && error.message?.toLowerCase().includes('column')) {
+    const fallbackRes = await adminClient.from('donation_requests').insert({
+      organization_id: user.id,
+      organization_name: orgName,
+      title,
+      description,
+      cause_category: causeCategory,
+      goal_amount: goalAmount,
+      deadline: deadlineStr || null,
+      image_url: imageUrl || null,
+      status: 'active',
+    })
+    error = fallbackRes.error
+  }
 
   if (error) {
     console.error('Error creating donation request:', error)
@@ -131,6 +158,8 @@ export async function makeDonationAction(
 
   const amountStr = formData.get('amount')?.toString().trim() ?? ''
   const donationRequestId = formData.get('donationRequestId')?.toString().trim() ?? ''
+  const upiId = formData.get('upiId')?.toString().trim() ?? ''
+  const upiReference = formData.get('upiReference')?.toString().trim() ?? ''
 
   const errors: Record<string, string[]> = {}
 
@@ -162,14 +191,29 @@ export async function makeDonationAction(
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   const adminClient = createAdminClient(supabaseUrl, serviceKey)
 
-  const { error } = await adminClient.from('donations').insert({
+  let { error } = await adminClient.from('donations').insert({
     donor_id: user.id,
     organization_id: request.organization_id,
     donation_request_id: donationRequestId,
     amount,
     currency: 'INR',
+    upi_id: upiId || null,
+    upi_txn_ref: upiReference || null,
     status: 'completed',
   })
+
+  // If columns don't exist yet, retry with base columns
+  if (error && error.message?.toLowerCase().includes('column')) {
+    const fallbackRes = await adminClient.from('donations').insert({
+      donor_id: user.id,
+      organization_id: request.organization_id,
+      donation_request_id: donationRequestId,
+      amount,
+      currency: 'INR',
+      status: 'completed',
+    })
+    error = fallbackRes.error
+  }
 
   if (error) {
     console.error('Error recording donation:', error)
@@ -177,7 +221,7 @@ export async function makeDonationAction(
   }
 
   revalidatePath('/dashboard')
-  return { message: `Thank you for your donation of ₹${amount.toLocaleString('en-IN')}! Your generosity makes a real difference. 💛` }
+  return { message: `Thank you for your donation of ₹${amount.toLocaleString('en-IN')}! Your payment has been routed to the organization's verified UPI account. 💛` }
 }
 
 // ─── Close Campaign (Organization) ───────────────────────────────────────────

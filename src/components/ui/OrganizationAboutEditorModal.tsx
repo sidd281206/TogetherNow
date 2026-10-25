@@ -23,14 +23,16 @@ import {
   Upload, 
   ShieldCheck,
   Save,
-  CheckCircle2
+  CheckCircle2,
+  Wallet
 } from 'lucide-react'
 import { 
   OrganizationProfileData, 
   OrgGalleryItem, 
   OrgPastEvent, 
   getOrganizationProfile, 
-  saveOrganizationProfile 
+  saveOrganizationProfile,
+  setOrganizationUpiId
 } from '@/lib/organizations'
 import OrganizationAboutModal from '@/components/ui/OrganizationAboutModal'
 
@@ -186,6 +188,12 @@ export default function OrganizationAboutEditorModal({
   const handleSaveAndPublish = () => {
     if (!formData) return
     saveOrganizationProfile(formData, organizationId)
+    if (formData.upiId) {
+      setOrganizationUpiId(organizationName, formData.upiId)
+      if (organizationId) {
+        setOrganizationUpiId(organizationId, formData.upiId)
+      }
+    }
     setIsSavedToast(true)
     setTimeout(() => {
       setIsSavedToast(false)
@@ -883,6 +891,33 @@ export default function OrganizationAboutEditorModal({
                     onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                     placeholder="e.g. Gate 2 Promenade, Marine Drive Coastal Stretch, Mumbai 400020"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
+                  />
+                </div>
+
+                {/* Organization UPI ID for Direct Donations */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/40 border border-emerald-200 dark:border-emerald-800/60 space-y-2 mt-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center">
+                        <Wallet className="w-3.5 h-3.5" />
+                      </div>
+                      <label className="text-xs font-black text-gray-900 dark:text-white">
+                        Official Organization UPI ID (Direct Donations) *
+                      </label>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-300 font-extrabold text-[10px]">
+                      Instant QR Code Payments
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-600 dark:text-gray-400 m-0 leading-relaxed">
+                    When donors contribute to your causes, a dynamic QR code for the exact donation amount will be automatically generated and linked to this UPI ID.
+                  </p>
+                  <input
+                    type="text"
+                    value={formData.upiId || ''}
+                    onChange={(e) => setFormData({ ...formData, upiId: e.target.value.trim() })}
+                    placeholder="e.g. oceanearth@okaxis or ngo@icici"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 text-xs font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-gray-400"
                   />
                 </div>
               </div>

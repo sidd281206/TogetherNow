@@ -16,9 +16,14 @@ import {
   Sparkles,
   ShieldCheck,
   Clock,
-  Layers
+  Layers,
+  QrCode,
+  Copy,
+  Check,
+  Edit2
 } from 'lucide-react'
 import { createDonationRequestAction, closeCampaignAction } from '@/app/actions/donations'
+import { getOrganizationUpiId, setOrganizationUpiId } from '@/lib/organizations'
 
 interface Campaign {
   id: string
@@ -55,10 +60,16 @@ function RaiseFundsModal({
 }) {
   const [state, action, pending] = useActionState(createDonationRequestAction, null)
   const [success, setSuccess] = useState(false)
+  const [upiId, setUpiId] = useState(() => getOrganizationUpiId(organizationName))
 
   useEffect(() => {
-    if (state?.message) setSuccess(true)
-  }, [state])
+    if (state?.message) {
+      setSuccess(true)
+      if (upiId.trim()) {
+        setOrganizationUpiId(organizationName, upiId.trim())
+      }
+    }
+  }, [state, upiId, organizationName])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -288,6 +299,34 @@ function RaiseFundsModal({
                 />
               </div>
 
+              {/* Organization UPI ID */}
+              <div className="p-3.5 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor="campaign-upi"
+                    className="block text-xs font-bold text-gray-800 dark:text-gray-200"
+                  >
+                    Organization UPI ID for Payments *
+                  </label>
+                  <span className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <QrCode className="w-3 h-3" /> Dynamic QR Ready
+                  </span>
+                </div>
+                <input
+                  id="campaign-upi"
+                  name="upiId"
+                  type="text"
+                  required
+                  value={upiId}
+                  onChange={(e) => setUpiId(e.target.value.trim())}
+                  placeholder="e.g. oceanearth@okaxis or care@icici"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 m-0">
+                  Donors will scan a dynamically generated QR code that routes payments directly to this UPI address.
+                </p>
+              </div>
+
               {/* Submit */}
               <button
                 id="raise-funds-submit"
@@ -314,10 +353,39 @@ export default function OrgFundraisingPanel({
   const [showModal, setShowModal] = useState(false)
   const [closingId, setClosingId] = useState<string | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>(myCampaigns)
+  const [orgUpiId, setOrgUpiId] = useState(() => getOrganizationUpiId(organizationName))
+  const [isEditingUpi, setIsEditingUpi] = useState(false)
+  const [editUpiVal, setEditUpiVal] = useState('')
+  const [copiedUpi, setCopiedUpi] = useState(false)
 
   useEffect(() => {
     setCampaigns(myCampaigns)
   }, [myCampaigns])
+
+  useEffect(() => {
+    const handleUpiUpdated = (e: any) => {
+      if (e.detail?.upiId) {
+        setOrgUpiId(e.detail.upiId)
+      }
+    }
+    window.addEventListener('togethernow_org_upi_updated', handleUpiUpdated)
+    return () => window.removeEventListener('togethernow_org_upi_updated', handleUpiUpdated)
+  }, [])
+
+  const handleCopyUpi = () => {
+    if (!orgUpiId) return
+    navigator.clipboard.writeText(orgUpiId)
+    setCopiedUpi(true)
+    setTimeout(() => setCopiedUpi(false), 2000)
+  }
+
+  const handleSaveUpi = () => {
+    if (!editUpiVal.trim()) return
+    const val = editUpiVal.trim()
+    setOrgUpiId(val)
+    setOrganizationUpiId(organizationName, val)
+    setIsEditingUpi(false)
+  }
 
   const isApproved = orgStatus === 'approved'
   const totalRaised = campaigns.reduce((sum, c) => sum + Number(c.raised_amount || 0), 0)
@@ -386,6 +454,79 @@ export default function OrgFundraisingPanel({
               <Plus className="w-3.5 h-3.5" />
               <span>Raise Funds (Verification Required)</span>
             </div>
+          )}
+        </div>
+      </div>
+
+      {/* Organization UPI ID Quick Settings Banner */}
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50/80 via-teal-50/70 to-emerald-50/80 dark:from-emerald-950/30 dark:via-teal-950/30 dark:to-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+            <QrCode className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-black text-gray-900 dark:text-white">
+                Direct UPI &amp; Dynamic QR Donations
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-300 text-[10px] font-extrabold flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" /> Active
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-0.5 text-xs flex-wrap">
+              <span className="text-gray-500 dark:text-gray-400">Recipient UPI ID:</span>
+              <code className="px-2 py-0.5 rounded-md bg-white dark:bg-gray-800 font-mono font-bold text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 text-xs">
+                {orgUpiId}
+              </code>
+              <button
+                type="button"
+                onClick={handleCopyUpi}
+                className="text-gray-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors border-none bg-transparent cursor-pointer p-1"
+                title="Copy UPI ID"
+              >
+                {copiedUpi ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+          {isEditingUpi ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={editUpiVal}
+                onChange={(e) => setEditUpiVal(e.target.value.trim())}
+                placeholder="e.g. org@upi"
+                className="px-3 py-1.5 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 text-xs font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <button
+                type="button"
+                onClick={handleSaveUpi}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold border-none cursor-pointer transition-colors shadow-xs"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEditingUpi(false)}
+                className="px-2.5 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-bold border-none cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setEditUpiVal(orgUpiId)
+                setIsEditingUpi(true)
+              }}
+              className="px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-50 dark:bg-gray-800 dark:hover:bg-gray-700 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-extrabold cursor-pointer transition-colors shadow-2xs flex items-center gap-1.5"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+              <span>Update UPI ID</span>
+            </button>
           )}
         </div>
       </div>

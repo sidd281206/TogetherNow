@@ -1,8 +1,32 @@
 'use client'
 
 import React, { useState, useActionState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
-import { Heart, TrendingUp, Users, Target, Calendar, X, ChevronRight, Wallet, AlertCircle, CheckCircle2, Building2, Sparkles, Search, Filter, Camera, User } from 'lucide-react'
+import { 
+  Heart, 
+  TrendingUp, 
+  Users, 
+  Target, 
+  Calendar, 
+  X, 
+  ChevronRight, 
+  Wallet, 
+  AlertCircle, 
+  CheckCircle2, 
+  Building2, 
+  Sparkles, 
+  Search, 
+  Filter, 
+  Camera, 
+  User, 
+  QrCode, 
+  Copy, 
+  Check, 
+  ExternalLink, 
+  ShieldCheck 
+} from 'lucide-react'
+import QRCode from 'qrcode'
 import { makeDonationAction } from '@/app/actions/donations'
+import { getOrganizationUpiId } from '@/lib/organizations'
 import VolunteerPhotoUploadModal from './VolunteerPhotoUploadModal'
 import ProfileCompletionModal from './ProfileCompletionModal'
 
@@ -20,6 +44,7 @@ interface DonationRequest {
   image_url: string | null
   status: string
   created_at: string
+  upi_id?: string | null
 }
 
 interface DonorStats {
@@ -127,10 +152,13 @@ function CampaignCard({
           </span>
         </div>
 
-        {/* Cause badge + urgency */}
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        {/* Cause badge + urgency + UPI */}
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', backgroundColor: causeColor.bg, color: causeColor.text }}>
             {campaign.cause_category}
+          </span>
+          <span style={{ fontSize: '0.68rem', fontWeight: 800, padding: '2px 8px', borderRadius: '999px', backgroundColor: '#ecfdf5', color: '#047857', display: 'flex', alignItems: 'center', gap: '3px', border: '1px solid #a7f3d0' }}>
+            <QrCode style={{ width: '10px', height: '10px' }} /> UPI QR
           </span>
           {isUrgent && (
             <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', backgroundColor: '#fff1f2', color: '#be123c' }}>
@@ -167,7 +195,7 @@ function CampaignCard({
                 borderRadius: '999px',
                 background: progress >= 80
                   ? 'linear-gradient(90deg, #10b981, #059669)'
-                  : 'linear-gradient(90deg, #f59e0b, #10b981)',
+                  : 'linear-gradient(90deg, #10b981, #047857)',
                 transition: 'width 0.5s ease',
               }}
             />
@@ -186,7 +214,7 @@ function CampaignCard({
             style={{
               padding: '8px 16px',
               borderRadius: '10px',
-              background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+              background: 'linear-gradient(135deg, #10b981, #059669)',
               color: '#ffffff',
               fontSize: '0.8rem',
               fontWeight: 800,
@@ -194,14 +222,15 @@ function CampaignCard({
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '5px',
+              gap: '6px',
+              boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)',
               transition: 'opacity 0.15s',
             }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.9' }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
           >
-            <Heart style={{ width: '13px', height: '13px' }} />
-            Donate Now
+            <QrCode style={{ width: '13px', height: '13px' }} />
+            Donate via UPI
           </button>
         </div>
       </div>
@@ -217,8 +246,18 @@ function DonateModal({
   onClose: () => void
 }) {
   const [state, action, pending] = useActionState(makeDonationAction, null)
-  const [amount, setAmount] = useState('')
+  const [amount, setAmount] = useState('500')
   const [success, setSuccess] = useState(false)
+  const [qrDataUrl, setQrDataUrl] = useState<string>('')
+  const [qrLoading, setQrLoading] = useState<boolean>(false)
+  const [copiedUpi, setCopiedUpi] = useState<boolean>(false)
+  const [upiReference, setUpiReference] = useState<string>('')
+
+  // Resolve official organization UPI ID
+  const orgUpiId =
+    campaign.upi_id ||
+    getOrganizationUpiId(campaign.organization_name) ||
+    'oceanearth@okaxis'
 
   useEffect(() => {
     if (state?.message) {
@@ -235,138 +274,461 @@ function DonateModal({
     return () => document.removeEventListener('keydown', handler)
   }, [onClose])
 
+  // Generate dynamic QR Code whenever amount or orgUpiId changes
+  useEffect(() => {
+    const numAmount = parseFloat(amount)
+    if (!isNaN(numAmount) && numAmount >= 10) {
+      setQrLoading(true)
+      const upiUri = `upi://pay?pa=${encodeURIComponent(orgUpiId)}&pn=${encodeURIComponent(campaign.organization_name)}&am=${numAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent('Donation for ' + campaign.title.slice(0, 45))}`
+
+      QRCode.toDataURL(upiUri, {
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        scale: 6,
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff',
+        },
+      })
+        .then((url) => {
+          setQrDataUrl(url)
+          setQrLoading(false)
+        })
+        .catch((err) => {
+          console.error('Failed to generate UPI QR code:', err)
+          setQrLoading(false)
+        })
+    } else {
+      setQrDataUrl('')
+    }
+  }, [amount, orgUpiId, campaign.organization_name, campaign.title])
+
+  const handleCopyUpi = () => {
+    if (!orgUpiId) return
+    navigator.clipboard.writeText(orgUpiId)
+    setCopiedUpi(true)
+    setTimeout(() => setCopiedUpi(false), 2000)
+  }
+
+  const numAmount = parseFloat(amount) || 0
+  const upiDeepLink = numAmount >= 10
+    ? `upi://pay?pa=${encodeURIComponent(orgUpiId)}&pn=${encodeURIComponent(campaign.organization_name)}&am=${numAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent('Donation for ' + campaign.title.slice(0, 45))}`
+    : ''
+
   const progress = Math.min(100, Math.round((campaign.raised_amount / campaign.goal_amount) * 100))
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', backdropFilter: 'blur(8px)', backgroundColor: 'rgba(0,0,0,0.55)' }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '16px',
+        backdropFilter: 'blur(8px)',
+        backgroundColor: 'rgba(0,0,0,0.65)',
+      }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ backgroundColor: '#ffffff', borderRadius: '24px', width: '100%', maxWidth: '480px', overflow: 'hidden', boxShadow: '0 24px 80px rgba(0,0,0,0.25)', animation: 'slideUp 0.22s ease' }}>
+      <div
+        style={{
+          backgroundColor: '#ffffff',
+          borderRadius: '28px',
+          width: '100%',
+          maxWidth: '520px',
+          maxHeight: '92vh',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.3)',
+          animation: 'slideUp 0.22s ease',
+        }}
+      >
         {/* Header */}
-        <div style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', padding: '20px 20px 16px', position: 'relative' }}>
+        <div style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%)', padding: '20px 22px 18px', position: 'relative', color: '#ffffff', flexShrink: 0 }}>
           <button
             id="donate-modal-close"
             onClick={onClose}
-            style={{ position: 'absolute', top: '14px', right: '14px', background: 'rgba(255,255,255,0.25)', border: 'none', borderRadius: '50%', width: '30px', height: '30px', cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{
+              position: 'absolute',
+              top: '16px',
+              right: '16px',
+              background: 'rgba(255,255,255,0.2)',
+              border: 'none',
+              borderRadius: '50%',
+              width: '32px',
+              height: '32px',
+              cursor: 'pointer',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'background 0.15s',
+            }}
+            aria-label="Close modal"
           >
             <X style={{ width: '16px', height: '16px' }} />
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-            <Heart style={{ width: '20px', height: '20px', color: '#fff' }} />
-            <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: '0.78rem', fontWeight: 700 }}>Making a Donation</span>
+            <span style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Heart style={{ width: '16px', height: '16px', color: '#fff', fill: '#fff' }} />
+            </span>
+            <span style={{ color: '#d1fae5', fontSize: '0.78rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Instant UPI Donation
+            </span>
           </div>
-          <h3 style={{ margin: 0, color: '#ffffff', fontSize: '1rem', fontWeight: 800, lineHeight: 1.3 }}>{campaign.title}</h3>
-          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.8)', fontSize: '0.75rem' }}>{campaign.organization_name}</p>
+          <h3 style={{ margin: 0, color: '#ffffff', fontSize: '1.1rem', fontWeight: 900, lineHeight: 1.3 }}>
+            {campaign.title}
+          </h3>
+          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.9)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <Building2 style={{ width: '13px', height: '13px' }} />
+            {campaign.organization_name} • Verified Organization
+          </p>
         </div>
 
-        {/* Progress recap */}
-        <div style={{ padding: '14px 20px', backgroundColor: '#fffbeb', borderBottom: '1px solid #fde68a' }}>
+        {/* Progress bar recap */}
+        <div style={{ padding: '12px 22px', backgroundColor: '#ecfdf5', borderBottom: '1px solid #a7f3d0', flexShrink: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#0f172a' }}>₹{Number(campaign.raised_amount).toLocaleString('en-IN')} raised</span>
-            <span style={{ fontSize: '0.78rem', color: '#64748b' }}>{progress}% of ₹{Number(campaign.goal_amount).toLocaleString('en-IN')}</span>
+            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#065f46' }}>
+              ₹{Number(campaign.raised_amount).toLocaleString('en-IN')} raised
+            </span>
+            <span style={{ fontSize: '0.78rem', color: '#047857', fontWeight: 600 }}>
+              {progress}% of ₹{Number(campaign.goal_amount).toLocaleString('en-IN')}
+            </span>
           </div>
-          <div style={{ height: '6px', borderRadius: '999px', backgroundColor: '#fde68a', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${progress}%`, borderRadius: '999px', background: 'linear-gradient(90deg, #f59e0b, #10b981)' }} />
+          <div style={{ height: '6px', borderRadius: '999px', backgroundColor: '#d1fae5', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${progress}%`, borderRadius: '999px', background: 'linear-gradient(90deg, #10b981, #047857)' }} />
           </div>
         </div>
 
-        <div style={{ padding: '20px' }}>
+        {/* Modal Scrollable Body */}
+        <div style={{ padding: '20px 22px', overflowY: 'auto', flex: 1 }}>
           {success ? (
-            <div style={{ textAlign: 'center', padding: '24px 0' }}>
-              <div style={{ fontSize: '3rem', marginBottom: '12px' }}>💛</div>
-              <h4 style={{ margin: '0 0 8px', fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>Thank you!</h4>
-              <p style={{ margin: '0 0 20px', fontSize: '0.85rem', color: '#64748b', lineHeight: 1.5 }}>{state?.message}</p>
+            <div style={{ textAlign: 'center', padding: '24px 8px' }}>
+              <div style={{ width: '64px', height: '64px', borderRadius: '24px', backgroundColor: '#ecfdf5', color: '#059669', margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem' }}>
+                🎉
+              </div>
+              <h4 style={{ margin: '0 0 8px', fontSize: '1.25rem', fontWeight: 900, color: '#0f172a' }}>
+                Donation Completed!
+              </h4>
+              <p style={{ margin: '0 0 16px', fontSize: '0.88rem', color: '#475569', lineHeight: 1.6, maxWidth: '380px', marginInline: 'auto' }}>
+                {state?.message || `Thank you for contributing ₹${Number(amount).toLocaleString('en-IN')} to ${campaign.organization_name}!`}
+              </p>
+              <div style={{ padding: '14px 16px', borderRadius: '16px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', maxWidth: '360px', margin: '0 auto 20px', textAlign: 'left', fontSize: '0.78rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ color: '#64748b' }}>Recipient UPI ID:</span>
+                  <span style={{ fontWeight: 800, color: '#0f172a' }}>{orgUpiId}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Status:</span>
+                  <span style={{ fontWeight: 800, color: '#059669', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <CheckCircle2 style={{ width: '12px', height: '12px' }} /> Transferred / Confirmed
+                  </span>
+                </div>
+              </div>
               <button
                 id="donate-success-close"
                 onClick={onClose}
-                style={{ padding: '10px 24px', borderRadius: '12px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#fff', fontWeight: 800, border: 'none', cursor: 'pointer', fontSize: '0.88rem' }}
+                style={{
+                  padding: '12px 32px',
+                  borderRadius: '14px',
+                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  color: '#fff',
+                  fontWeight: 800,
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '0.9rem',
+                  boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+                }}
               >
-                Close
+                Done
               </button>
             </div>
           ) : (
-            <form action={action}>
+            <form action={action} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <input type="hidden" name="donationRequestId" value={campaign.id} />
+              <input type="hidden" name="upiId" value={orgUpiId} />
 
               {state?.errors?.general && (
-                <div style={{ padding: '10px 12px', borderRadius: '10px', backgroundColor: '#fff1f2', color: '#be123c', fontSize: '0.8rem', fontWeight: 600, marginBottom: '14px', display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  <AlertCircle style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                <div style={{ padding: '10px 14px', borderRadius: '12px', backgroundColor: '#fff1f2', color: '#be123c', fontSize: '0.8rem', fontWeight: 600, display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <AlertCircle style={{ width: '16px', height: '16px', flexShrink: 0 }} />
                   {state.errors.general[0]}
                 </div>
               )}
 
-              {/* Amount presets */}
-              <p style={{ margin: '0 0 10px', fontSize: '0.82rem', fontWeight: 700, color: '#374151' }}>Choose or enter an amount (₹)</p>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                {AMOUNT_PRESETS.map(p => (
-                  <button
-                    key={p}
-                    id={`preset-${p}`}
-                    type="button"
-                    onClick={() => handlePreset(p)}
+              {/* Amount Presets */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
+                  Select Donation Amount (₹)
+                </label>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {AMOUNT_PRESETS.map(p => (
+                    <button
+                      key={p}
+                      id={`preset-${p}`}
+                      type="button"
+                      onClick={() => handlePreset(p)}
+                      style={{
+                        flex: '1 1 80px',
+                        padding: '10px 14px',
+                        borderRadius: '12px',
+                        fontSize: '0.85rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        border: amount === String(p) ? '2px solid #059669' : '1.5px solid #e2e8f0',
+                        backgroundColor: amount === String(p) ? '#ecfdf5' : '#f8fafc',
+                        color: amount === String(p) ? '#065f46' : '#334155',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      ₹{p.toLocaleString('en-IN')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom Amount Input */}
+              <div>
+                <label htmlFor="donate-amount" style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  Or enter custom amount (₹)
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', fontWeight: 800, color: '#64748b', fontSize: '1rem' }}>
+                    ₹
+                  </span>
+                  <input
+                    id="donate-amount"
+                    name="amount"
+                    type="number"
+                    min={10}
+                    step={1}
+                    value={amount}
+                    onChange={e => setAmount(e.target.value)}
+                    placeholder="e.g. 750"
                     style={{
-                      flex: '1 1 80px',
-                      padding: '9px 12px',
-                      borderRadius: '10px',
-                      fontSize: '0.82rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      border: amount === String(p) ? '2px solid #d97706' : '1.5px solid #e2e8f0',
-                      backgroundColor: amount === String(p) ? '#fffbeb' : '#f8fafc',
-                      color: amount === String(p) ? '#92400e' : '#374151',
-                      transition: 'all 0.15s',
+                      width: '100%',
+                      padding: '11px 14px 11px 32px',
+                      borderRadius: '12px',
+                      border: state?.errors?.amount ? '2px solid #f87171' : '1.5px solid #cbd5e1',
+                      fontSize: '0.95rem',
+                      fontWeight: 800,
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                      color: '#0f172a',
+                    }}
+                  />
+                </div>
+                {state?.errors?.amount && (
+                  <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: '#dc2626', fontWeight: 600 }}>
+                    {state.errors.amount[0]}
+                  </p>
+                )}
+              </div>
+
+              {/* Dynamic QR Code Box */}
+              {numAmount >= 10 && (
+                <div
+                  style={{
+                    padding: '18px',
+                    borderRadius: '20px',
+                    backgroundColor: '#f8fafc',
+                    border: '1.5px solid #e2e8f0',
+                    textAlign: 'center',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.03)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '12px' }}>
+                    <QrCode style={{ width: '18px', height: '18px', color: '#059669' }} />
+                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0f172a' }}>
+                      Scan &amp; Pay ₹{numAmount.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+
+                  {/* The Generated QR Image */}
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '12px',
+                      backgroundColor: '#ffffff',
+                      borderRadius: '20px',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+                      border: '1px solid #e2e8f0',
+                      marginBottom: '12px',
                     }}
                   >
-                    ₹{p.toLocaleString('en-IN')}
-                  </button>
-                ))}
-              </div>
+                    {qrLoading ? (
+                      <div style={{ width: '180px', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '0.8rem' }}>
+                        Generating QR...
+                      </div>
+                    ) : qrDataUrl ? (
+                      <img
+                        src={qrDataUrl}
+                        alt="Dynamic UPI QR Code"
+                        style={{ width: '180px', height: '180px', display: 'block', borderRadius: '10px' }}
+                      />
+                    ) : (
+                      <div style={{ width: '180px', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '0.8rem' }}>
+                        Enter valid amount
+                      </div>
+                    )}
+                  </div>
 
-              <div style={{ marginBottom: '14px' }}>
+                  {/* Organization UPI ID details */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      padding: '8px 14px',
+                      borderRadius: '12px',
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #e2e8f0',
+                      maxWidth: '340px',
+                      margin: '0 auto 10px',
+                    }}
+                  >
+                    <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>UPI ID:</span>
+                    <code style={{ fontSize: '0.8rem', fontWeight: 800, color: '#047857' }}>
+                      {orgUpiId}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={handleCopyUpi}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: copiedUpi ? '#059669' : '#64748b',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '2px 6px',
+                        borderRadius: '6px',
+                        backgroundColor: copiedUpi ? '#ecfdf5' : '#f1f5f9',
+                      }}
+                      title="Copy UPI ID"
+                    >
+                      {copiedUpi ? <Check style={{ width: '12px', height: '12px' }} /> : <Copy style={{ width: '12px', height: '12px' }} />}
+                      {copiedUpi ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+
+                  {/* Supported UPI Apps Pills */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                    <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 600 }}>Supported Apps:</span>
+                    {['Google Pay', 'PhonePe', 'Paytm', 'BHIM', 'Amazon Pay'].map((app) => (
+                      <span
+                        key={app}
+                        style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '999px',
+                          backgroundColor: '#ffffff',
+                          color: '#475569',
+                          border: '1px solid #e2e8f0',
+                        }}
+                      >
+                        {app}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Deep link button for mobile devices */}
+                  {upiDeepLink && (
+                    <a
+                      href={upiDeepLink}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        padding: '8px 16px',
+                        borderRadius: '12px',
+                        backgroundColor: '#ecfdf5',
+                        color: '#047857',
+                        fontSize: '0.78rem',
+                        fontWeight: 800,
+                        textDecoration: 'none',
+                        border: '1px solid #a7f3d0',
+                        transition: 'background 0.15s',
+                      }}
+                    >
+                      <ExternalLink style={{ width: '13px', height: '13px' }} />
+                      <span>Open Installed UPI App on Phone</span>
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {/* Optional UPI UTR / Reference ID */}
+              <div>
+                <label
+                  htmlFor="donate-upi-ref"
+                  style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}
+                >
+                  UPI Reference / UTR Number <span style={{ fontWeight: 400, color: '#94a3b8' }}>(Optional)</span>
+                </label>
                 <input
-                  id="donate-amount"
-                  name="amount"
-                  type="number"
-                  min={10}
-                  step={1}
-                  value={amount}
-                  onChange={e => setAmount(e.target.value)}
-                  placeholder="Or type a custom amount (min ₹10)"
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: state?.errors?.amount ? '1.5px solid #f87171' : '1.5px solid #e2e8f0', fontSize: '0.88rem', fontWeight: 600, outline: 'none', boxSizing: 'border-box' }}
+                  id="donate-upi-ref"
+                  name="upiReference"
+                  type="text"
+                  value={upiReference}
+                  onChange={e => setUpiReference(e.target.value)}
+                  placeholder="e.g. 12-digit transaction UTR number"
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: '12px',
+                    border: '1.5px solid #e2e8f0',
+                    fontSize: '0.82rem',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    color: '#0f172a',
+                  }}
                 />
-                {state?.errors?.amount && <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: '#dc2626', fontWeight: 600 }}>{state.errors.amount[0]}</p>}
               </div>
 
-              {/* Simulation notice */}
-              <div style={{ padding: '10px 12px', borderRadius: '10px', backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', color: '#0369a1', fontSize: '0.75rem', fontWeight: 600, marginBottom: '16px', display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                <Wallet style={{ width: '14px', height: '14px', flexShrink: 0, marginTop: '1px' }} />
-                <span>This is a simulation. No real payment is processed. In production, integrate Razorpay or Stripe here.</span>
-              </div>
-
+              {/* Submission CTA */}
               <button
                 id="donate-submit"
                 type="submit"
-                disabled={pending || !amount}
+                disabled={pending || numAmount < 10}
                 style={{
                   width: '100%',
-                  padding: '12px',
-                  borderRadius: '12px',
-                  background: (!amount || pending) ? '#e2e8f0' : 'linear-gradient(135deg, #f59e0b, #d97706)',
-                  color: (!amount || pending) ? '#94a3b8' : '#ffffff',
+                  padding: '14px',
+                  borderRadius: '16px',
+                  background: (numAmount < 10 || pending)
+                    ? '#cbd5e1'
+                    : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  color: (numAmount < 10 || pending) ? '#64748b' : '#ffffff',
                   fontSize: '0.95rem',
-                  fontWeight: 800,
+                  fontWeight: 900,
                   border: 'none',
-                  cursor: pending || !amount ? 'not-allowed' : 'pointer',
+                  cursor: (numAmount < 10 || pending) ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '8px',
                   transition: 'all 0.15s',
+                  boxShadow: numAmount >= 10 && !pending ? '0 8px 24px rgba(16, 185, 129, 0.35)' : 'none',
                 }}
               >
-                <Heart style={{ width: '16px', height: '16px' }} />
-                {pending ? 'Processing...' : `Donate ₹${amount ? Number(amount).toLocaleString('en-IN') : '—'}`}
+                <CheckCircle2 style={{ width: '18px', height: '18px' }} />
+                <span>
+                  {pending
+                    ? 'Confirming Payment...'
+                    : numAmount >= 10
+                    ? `I Have Paid ₹${numAmount.toLocaleString('en-IN')} • Confirm Donation`
+                    : 'Enter Amount to Donate'}
+                </span>
               </button>
             </form>
           )}
