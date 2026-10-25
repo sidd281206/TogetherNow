@@ -36,6 +36,7 @@ import RecommendedOpportunitiesSection from '@/components/ui/RecommendedOpportun
 import ProfileCompletionModal from '@/components/ui/ProfileCompletionModal'
 import VolunteerPhotoPromptBanner from '@/components/ui/VolunteerPhotoPromptBanner'
 import VolunteerBadgesModal from '@/components/ui/VolunteerBadgesModal'
+import VolunteerCertificateModal from '@/components/ui/VolunteerCertificateModal'
 import { getVolunteerBadges, getCurrentTierInfo, getHighestBadge } from '@/lib/badges'
 import { VolunteerPreferences } from '@/lib/recommendations'
 
@@ -116,6 +117,7 @@ export default function VolunteerDashboard({
   const [reviewedEventsMap, setReviewedEventsMap] = useState<Record<string, boolean>>({})
   const [showEditPreferencesModal, setShowEditPreferencesModal] = useState(false)
   const [showBadgesModal, setShowBadgesModal] = useState(false)
+  const [selectedCertificate, setSelectedCertificate] = useState<{ op?: Opportunity; app: Applicant } | null>(null)
 
   const [preferences, setPreferences] = useState<VolunteerPreferences>(() => {
     if (volunteerPreferences && (volunteerPreferences.skills.length > 0 || volunteerPreferences.interests.length > 0 || volunteerPreferences.city)) {
@@ -409,7 +411,7 @@ export default function VolunteerDashboard({
       />
 
       {/* Quick Impact Overview Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs flex items-center gap-4">
           <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 flex items-center justify-center font-bold text-xl shrink-0">
             <Clock className="w-6 h-6" />
@@ -470,6 +472,46 @@ export default function VolunteerDashboard({
               {approvedDrives.length} Drive{approvedDrives.length !== 1 ? 's' : ''}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Approved & Attending</div>
+          </div>
+        </div>
+
+        <div
+          id="volunteer-certificates-stat-card"
+          onClick={() => {
+            if (attendedDrives.length > 0) {
+              const latestAttended = attendedDrives[0]
+              const matched = opportunities.find((o) => o.id === latestAttended.eventId)
+              setSelectedCertificate({ app: latestAttended, op: matched })
+            }
+          }}
+          className={`bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs flex items-center justify-between gap-4 transition-all group ${
+            attendedDrives.length > 0
+              ? 'cursor-pointer hover:border-emerald-300 dark:hover:border-emerald-700/60 hover:shadow-md'
+              : 'opacity-90'
+          }`}
+          role={attendedDrives.length > 0 ? 'button' : undefined}
+          tabIndex={attendedDrives.length > 0 ? 0 : undefined}
+          title={attendedDrives.length > 0 ? 'Click to view & download your official Participation Certificate' : 'Get marked present at drives to earn verified certificates'}
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 flex items-center justify-center font-bold text-xl shrink-0 group-hover:scale-105 transition-transform">
+              <Award className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="text-2xl font-black text-gray-900 dark:text-white leading-none">
+                {attendedDrives.length} Cert{attendedDrives.length !== 1 ? 's' : ''}
+              </div>
+              <div className="text-xs font-bold mt-1 flex items-center gap-1">
+                {attendedDrives.length > 0 ? (
+                  <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 group-hover:underline">
+                    <span>Ready to Download</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </span>
+                ) : (
+                  <span className="text-gray-400 dark:text-gray-500 font-normal">Earn on attendance</span>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -716,18 +758,34 @@ export default function VolunteerDashboard({
                     ) : app.status === 'accepted' ? (
                       <div className="space-y-2">
                         {app.attendance === 'present' && (
-                          <div className="text-[11px] text-emerald-950 dark:text-emerald-200 font-bold flex items-center justify-between bg-emerald-100 dark:bg-emerald-900/50 p-2.5 rounded-xl border border-emerald-300 dark:border-emerald-700 shadow-2xs">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                              <span>
-                                ✓ Attendance Recorded: Marked Present
-                                {app.attendanceMarkedAt ? ` at ${formatAttendanceTime(app.attendanceMarkedAt)}` : ''}
-                                {app.attendanceMarkedBy ? ` by ${app.attendanceMarkedBy}` : ' by Coordinator'}
+                          <div className="space-y-2">
+                            <div className="text-[11px] text-emerald-950 dark:text-emerald-200 font-bold flex items-center justify-between bg-emerald-100 dark:bg-emerald-900/50 p-2.5 rounded-xl border border-emerald-300 dark:border-emerald-700 shadow-2xs">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                <span>
+                                  ✓ Attendance Recorded: Marked Present
+                                  {app.attendanceMarkedAt ? ` at ${formatAttendanceTime(app.attendanceMarkedAt)}` : ''}
+                                  {app.attendanceMarkedBy ? ` by ${app.attendanceMarkedBy}` : ' by Coordinator'}
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md bg-emerald-600 text-white tracking-wide">
+                                Attended
                               </span>
                             </div>
-                            <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md bg-emerald-600 text-white tracking-wide">
-                              Attended
-                            </span>
+
+                            {/* Download Participation Certificate Action */}
+                            <button
+                              type="button"
+                              id={`download-cert-${app.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedCertificate({ app, op: matchedOp })
+                              }}
+                              className="w-full flex items-center justify-center gap-2 py-2 px-3.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-500 hover:from-amber-600 hover:to-amber-700 text-white font-extrabold text-xs shadow-md shadow-amber-500/20 transition-all cursor-pointer border-none"
+                            >
+                              <Award className="w-4 h-4" />
+                              <span>Download Participation Certificate</span>
+                            </button>
                           </div>
                         )}
 
@@ -1061,6 +1119,18 @@ export default function VolunteerDashboard({
         totalHours={totalHours}
         userName={userName}
       />
+
+      {/* Volunteer Participation Certificate Modal */}
+      {selectedCertificate && (
+        <VolunteerCertificateModal
+          isOpen={Boolean(selectedCertificate)}
+          onClose={() => setSelectedCertificate(null)}
+          volunteerName={userName || selectedCertificate.app.name || 'Volunteer'}
+          volunteerEmail={userEmail || selectedCertificate.app.email}
+          applicant={selectedCertificate.app}
+          opportunity={selectedCertificate.op}
+        />
+      )}
     </div>
   )
 }
