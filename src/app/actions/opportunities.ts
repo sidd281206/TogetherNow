@@ -4,6 +4,12 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
+export interface EventManagerDetails {
+  name: string
+  phone: string
+  employeeId: string
+}
+
 export interface DbOpportunityInput {
   title: string
   category: 'Environment' | 'Education' | 'Health' | 'Community' | 'Tech' | 'Crisis Support'
@@ -11,6 +17,7 @@ export interface DbOpportunityInput {
   address?: string
   managerName?: string
   managerPhone?: string
+  eventManagers?: EventManagerDetails[]
   isRemote: boolean
   date: string
   time: string
@@ -41,6 +48,7 @@ export interface DbOpportunityOutput {
   address?: string
   managerName?: string
   managerPhone?: string
+  eventManagers?: EventManagerDetails[]
   assignedEmployeeIds?: string[]
   isRemote: boolean
   date: string
@@ -150,6 +158,7 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
     assigned_employee_ids: input.assignedEmployeeIds || [],
     description: injectMetadataIntoDescription(input.description.trim(), {
       assignedEmployeeIds: input.assignedEmployeeIds || [],
+      eventManagers: input.eventManagers || [],
     }),
   }
 
@@ -183,6 +192,7 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
       address: address,
       managerName,
       managerPhone,
+      eventManagers: input.eventManagers || [],
       isRemote: input.isRemote,
       date: input.date || 'Upcoming',
       time: input.time || '09:00 AM - 01:00 PM',
@@ -210,6 +220,7 @@ export async function createOpportunityAction(input: DbOpportunityInput): Promis
     address: inserted.address || address,
     managerName: inserted.manager_name || managerName,
     managerPhone: inserted.manager_phone || managerPhone,
+    eventManagers: input.eventManagers || [],
     assignedEmployeeIds: inserted.assigned_employee_ids || input.assignedEmployeeIds || [],
     isRemote: inserted.is_remote ?? input.isRemote,
     date: inserted.date || input.date || 'Upcoming',
@@ -329,6 +340,7 @@ export async function fetchOpportunitiesAction(): Promise<DbOpportunityOutput[]>
           address: op.address || meta.address || op.location || 'Local Community Center',
           managerName: resolvedManagerName,
           managerPhone: op.manager_phone || meta.managerPhone || '',
+          eventManagers: Array.isArray(meta.eventManagers) ? meta.eventManagers : [],
           assignedEmployeeIds: Array.isArray(op.assigned_employee_ids) && op.assigned_employee_ids.length > 0
             ? op.assigned_employee_ids
             : (meta.assignedEmployeeIds || []),

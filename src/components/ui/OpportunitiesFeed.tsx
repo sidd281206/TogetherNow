@@ -56,6 +56,12 @@ import { getOrgRatingSummary } from '@/lib/ratings'
 import { createClient } from '@/lib/supabase/client'
 import { VolunteerPreferences, scoreOpportunity, ScoredOpportunity } from '@/lib/recommendations'
 
+export interface EventManagerDetails {
+  name: string
+  phone: string
+  employeeId: string
+}
+
 export interface Opportunity {
   id: string
   title: string
@@ -69,6 +75,7 @@ export interface Opportunity {
   address?: string
   managerName?: string
   managerPhone?: string
+  eventManagers?: EventManagerDetails[]
   isRemote: boolean
   date: string
   time: string
@@ -481,9 +488,50 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
     const [newCategory, setNewCategory] = useState<Opportunity['category']>('Community')
     const [newLocation, setNewLocation] = useState('')
     const [newAddress, setNewAddress] = useState('')
-    const [newManagerName, setNewManagerName] = useState('')
-    const [newManagerPhone, setNewManagerPhone] = useState('')
-    const [newAssignedCodes, setNewAssignedCodes] = useState('EM101')
+    const [eventManagers, setEventManagers] = useState<EventManagerDetails[]>([
+      { name: '', phone: '', employeeId: 'EM101' },
+    ])
+
+    const handleManagerCountChange = (count: number) => {
+      const targetCount = Math.max(1, Math.min(8, count))
+      setEventManagers((prev) => {
+        if (prev.length === targetCount) return prev
+        if (prev.length < targetCount) {
+          const added: EventManagerDetails[] = []
+          for (let i = prev.length; i < targetCount; i++) {
+            added.push({
+              name: '',
+              phone: '',
+              employeeId: `EM10${i + 1}`,
+            })
+          }
+          return [...prev, ...added]
+        } else {
+          return prev.slice(0, targetCount)
+        }
+      })
+    }
+
+    const handleAddManager = () => {
+      if (eventManagers.length >= 8) return
+      setEventManagers((prev) => [
+        ...prev,
+        { name: '', phone: '', employeeId: `EM10${prev.length + 1}` },
+      ])
+    }
+
+    const handleRemoveManager = (index: number) => {
+      if (eventManagers.length <= 1) return
+      setEventManagers((prev) => prev.filter((_, i) => i !== index))
+    }
+
+    const handleUpdateManager = (index: number, field: keyof EventManagerDetails, value: string) => {
+      setEventManagers((prev) => {
+        const copy = [...prev]
+        copy[index] = { ...copy[index], [field]: value }
+        return copy
+      })
+    }
     const [newIsRemote, setNewIsRemote] = useState(false)
     const [newDate, setNewDate] = useState('')
     const [newStartTime, setNewStartTime] = useState('09:00')
@@ -1155,16 +1203,32 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       }
       if (!newStartTime) setNewStartTime('09:00')
       if (!newEndTime) setNewEndTime('13:00')
-      if (!newManagerName) {
-        setNewManagerName(organizationName || 'Drive Coordinator')
-      }
-      if (!newManagerPhone) {
+      if (!eventManagers || eventManagers.length === 0) {
+        let savedPhone = '+91 98201 44521'
         try {
-          const savedPhone = localStorage.getItem(`togethernow_user_phone_${userEmail}`)
-          setNewManagerPhone(savedPhone || '+91 98201 44521')
-        } catch {
-          setNewManagerPhone('+91 98201 44521')
-        }
+          const sp = localStorage.getItem(`togethernow_user_phone_${userEmail}`)
+          if (sp) savedPhone = sp
+        } catch {}
+        setEventManagers([
+          {
+            name: organizationName || 'Drive Coordinator',
+            phone: savedPhone,
+            employeeId: 'EM101',
+          },
+        ])
+      } else if (eventManagers.length === 1 && !eventManagers[0].name) {
+        let savedPhone = '+91 98201 44521'
+        try {
+          const sp = localStorage.getItem(`togethernow_user_phone_${userEmail}`)
+          if (sp) savedPhone = sp
+        } catch {}
+        setEventManagers([
+          {
+            name: organizationName || 'Drive Coordinator',
+            phone: eventManagers[0].phone || savedPhone,
+            employeeId: eventManagers[0].employeeId || 'EM101',
+          },
+        ])
       }
       if (!newLocation && !newIsRemote) {
         setNewLocation('Marine Drive Promenade, Mumbai')
@@ -1401,17 +1465,24 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       const orgName = (organizationName?.trim() && organizationName.trim() !== 'Organization')
         ? organizationName.trim()
         : 'Community Organization'
-      const managerName = newManagerName.trim() || orgName || 'Drive Coordinator'
-      const managerPhone = newManagerPhone.trim() || '+91 98201 44521'
+
+      const assignedEmployeeIds = eventManagers
+        .map((m) => m.employeeId.trim().toUpperCase())
+        .filter(Boolean)
+      if (assignedEmployeeIds.length === 0) assignedEmployeeIds.push('EM101')
+
+      const validManagers: EventManagerDetails[] = eventManagers.map((m, idx) => ({
+        name: m.name.trim() || `${orgName} Coordinator ${idx + 1}`,
+        phone: m.phone.trim() || '+91 98201 44521',
+        employeeId: m.employeeId.trim().toUpperCase() || `EM10${idx + 1}`,
+      }))
+
+      const managerNames = validManagers.map((m) => m.name).filter(Boolean)
+      const managerName = managerNames.join(', ') || orgName || 'Drive Coordinator'
+      const managerPhones = validManagers.map((m) => m.phone).filter(Boolean)
+      const managerPhone = managerPhones.join(', ') || '+91 98201 44521'
       const location = newIsRemote ? 'Remote' : (newLocation.trim() || newAddress.trim() || 'Marine Drive, Mumbai')
       const fullAddress = newIsRemote ? 'Online / Remote' : (newAddress.trim() || newLocation.trim() || 'Gate 2 Promenade, Marine Drive Coastal Stretch, Mumbai 400020')
-
-      const assignedEmployeeIds = newAssignedCodes
-        ? newAssignedCodes
-            .split(',')
-            .map((s) => s.trim().toUpperCase())
-            .filter(Boolean)
-        : ['EM101']
 
       const newOpPayload: Opportunity = {
         id: `event-${Date.now()}`,
@@ -1425,6 +1496,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         address: fullAddress,
         managerName,
         managerPhone,
+        eventManagers: validManagers,
         assignedEmployeeIds,
         isRemote: newIsRemote,
         date: formattedDate,
@@ -1456,6 +1528,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
           address: fullAddress,
           managerName,
           managerPhone,
+          eventManagers: validManagers,
           assignedEmployeeIds,
           isRemote: newIsRemote,
           date: formattedDate,
@@ -1473,6 +1546,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
             ...res.opportunity,
             managerName: res.opportunity.managerName || newOpPayload.managerName,
             managerPhone: res.opportunity.managerPhone || newOpPayload.managerPhone,
+            eventManagers: res.opportunity.eventManagers || validManagers,
             address: res.opportunity.address || newOpPayload.address,
             location: res.opportunity.location || newOpPayload.location,
             date: res.opportunity.date || newOpPayload.date,
@@ -1507,8 +1581,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
       setNewDescription('')
       setNewLocation('')
       setNewAddress('')
-      setNewManagerName('')
-      setNewManagerPhone('')
+      setEventManagers([{ name: '', phone: '', employeeId: 'EM101' }])
       setNewSkills('')
       setNewDate('')
       setNewStartTime('09:00')
@@ -2176,15 +2249,15 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
               )}
 
               {/* Event Manager / In-Charge Box */}
-              <div className="bg-indigo-50/70 dark:bg-indigo-950/40 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/50 space-y-2.5">
+              <div className="bg-indigo-50/70 dark:bg-indigo-950/40 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/50 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xs">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
                       <UserCheck className="w-4 h-4" />
                     </div>
                     <div>
                       <span className="block text-[10px] font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">
-                        Person in Charge / Event Manager
+                        Person in Charge / Event {viewingEventModal.eventManagers && viewingEventModal.eventManagers.length > 1 ? 'Managers' : 'Manager'}
                       </span>
                       <h5 className="text-sm font-extrabold text-gray-900 dark:text-white m-0">
                         {(viewingEventModal.managerName && viewingEventModal.managerName !== viewingEventModal.organization)
@@ -2196,7 +2269,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
 
                   {viewingEventModal.managerPhone && (
                     <a
-                      href={`tel:${viewingEventModal.managerPhone}`}
+                      href={`tel:${viewingEventModal.managerPhone.split(',')[0].trim()}`}
                       className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm text-decoration-none transition-all"
                     >
                       <Phone className="w-3.5 h-3.5" />
@@ -2204,6 +2277,48 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                     </a>
                   )}
                 </div>
+
+                {viewingEventModal.eventManagers && viewingEventModal.eventManagers.length > 0 && (
+                  <div className="space-y-1.5 pt-1 border-t border-indigo-100/70 dark:border-indigo-900/40">
+                    <span className="text-[10px] font-bold text-indigo-800 dark:text-indigo-300 uppercase tracking-wider">
+                      Assigned Event Managers ({viewingEventModal.eventManagers.length})
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {viewingEventModal.eventManagers.map((mgr, idx) => (
+                        <div
+                          key={idx}
+                          className="p-2.5 rounded-xl bg-white dark:bg-gray-800/90 border border-indigo-100/70 dark:border-indigo-900/40 flex items-center justify-between gap-2 shadow-2xs"
+                        >
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-bold flex items-center justify-center shrink-0">
+                                {idx + 1}
+                              </span>
+                              <span className="text-xs font-bold text-gray-900 dark:text-white truncate">
+                                {mgr.name}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-gray-500 dark:text-gray-400 pl-5 flex items-center gap-1.5">
+                              <span>{mgr.phone}</span>
+                              <span className="px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-mono font-bold text-[9px]">
+                                {mgr.employeeId}
+                              </span>
+                            </div>
+                          </div>
+                          {mgr.phone && (
+                            <a
+                              href={`tel:${mgr.phone}`}
+                              className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white dark:bg-emerald-950 dark:text-emerald-300 font-bold transition-all shrink-0"
+                              title={`Call ${mgr.name}`}
+                            >
+                              <Phone className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-700 dark:text-gray-300 pt-1 border-t border-indigo-100/70 dark:border-indigo-900/40">
                   <div className="flex items-center gap-1.5">
@@ -2989,7 +3104,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         {/* ============================================================ */}
         {showCreateModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-gray-100 dark:border-gray-800 max-h-[90vh] overflow-y-auto">
+            <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 max-w-2xl w-full shadow-2xl border border-gray-100 dark:border-gray-800 max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between pb-4 mb-4 border-b border-gray-100 dark:border-gray-800">
                 <div className="flex items-center gap-2">
                   <Plus className="w-5 h-5 text-emerald-600" />
@@ -3090,58 +3205,131 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
                   </div>
                 </div>
 
-                <div className="bg-indigo-50/70 dark:bg-indigo-950/40 p-3.5 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 space-y-2.5">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900 dark:text-indigo-200">
-                    <UserCheck className="w-4 h-4 text-indigo-600" />
-                    <span>Person in Charge / Event Manager *</span>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                        Manager Name *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={newManagerName}
-                        onChange={(e) => setNewManagerName(e.target.value)}
-                        placeholder="e.g. Arjun Nambiar"
-                        className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
+                <div className="bg-indigo-50/70 dark:bg-indigo-950/40 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-indigo-100/70 dark:border-indigo-900/50">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                        <UserCheck className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-indigo-950 dark:text-indigo-100">
+                          Person in Charge / Event Managers *
+                        </div>
+                        <p className="m-0 text-[10px] text-indigo-700/80 dark:text-indigo-300/80">
+                          Enter details for each event manager. Each manager will get login access.
+                        </p>
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                        Manager Phone Number *
+                    <div className="flex items-center gap-2 self-start sm:self-center">
+                      <label htmlFor="no-of-event-managers" className="text-[11px] font-bold text-indigo-900 dark:text-indigo-200">
+                        No. of Managers:
                       </label>
-                      <input
-                        type="tel"
-                        required
-                        value={newManagerPhone}
-                        onChange={(e) => setNewManagerPhone(e.target.value)}
-                        placeholder="e.g. +91 98201 44521"
-                        className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
+                      <select
+                        id="no-of-event-managers"
+                        value={eventManagers.length}
+                        onChange={(e) => handleManagerCountChange(Number(e.target.value))}
+                        className="px-2.5 py-1 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-white dark:bg-gray-800 text-xs font-bold text-indigo-950 dark:text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs"
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map((num) => (
+                          <option key={num} value={num}>
+                            {num} {num === 1 ? 'Manager' : 'Managers'}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleAddManager}
+                        disabled={eventManagers.length >= 8}
+                        className="px-2.5 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition-all border-none cursor-pointer"
+                        title="Add another Event Manager"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add</span>
+                      </button>
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-between">
-                      <span>Event Manager Employee Code(s) *</span>
-                      <span className="text-[10px] text-indigo-600 font-normal">Can enter multiple (e.g. EM101, EM102)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={newAssignedCodes}
-                      onChange={(e) => setNewAssignedCodes(e.target.value.toUpperCase())}
-                      placeholder="e.g. EM101, EM102"
-                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 font-mono font-bold text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    <p className="text-[10px] text-indigo-700/80 dark:text-indigo-300/80 m-0 mt-1">
-                      Assigned employees can log in at <code>/event-manager/login</code> to verify volunteers and track attendance.
-                    </p>
+                  {/* List of each event manager */}
+                  <div className="space-y-3">
+                    {eventManagers.map((mgr, index) => (
+                      <div
+                        key={index}
+                        className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-indigo-100 dark:border-indigo-900/60 shadow-2xs space-y-2.5 transition-all hover:border-indigo-300 dark:hover:border-indigo-700"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">
+                              {index + 1}
+                            </span>
+                            <span className="text-xs font-bold text-gray-900 dark:text-white">
+                              Event Manager #{index + 1} {index === 0 && <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium">(Lead Coordinator)</span>}
+                            </span>
+                          </div>
+
+                          {eventManagers.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveManager(index)}
+                              className="text-rose-500 hover:text-rose-700 dark:hover:text-rose-400 px-2 py-0.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200/50 dark:border-rose-900/40 bg-transparent cursor-pointer transition-all flex items-center gap-1 text-[11px] font-bold"
+                              title={`Remove Manager #${index + 1}`}
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>Remove</span>
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                              Manager Name *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={mgr.name}
+                              onChange={(e) => handleUpdateManager(index, 'name', e.target.value)}
+                              placeholder={index === 0 ? "e.g. Arjun Nambiar" : `e.g. Manager ${index + 1} Name`}
+                              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/60 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                              Manager Phone Number *
+                            </label>
+                            <input
+                              type="tel"
+                              required
+                              value={mgr.phone}
+                              onChange={(e) => handleUpdateManager(index, 'phone', e.target.value)}
+                              placeholder="e.g. +91 98201 44521"
+                              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/60 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                              Employee ID / Code *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={mgr.employeeId}
+                              onChange={(e) => handleUpdateManager(index, 'employeeId', e.target.value.toUpperCase())}
+                              placeholder={`e.g. EM10${index + 1}`}
+                              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/60 font-mono font-bold text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
+
+                  <p className="text-[11px] text-indigo-800/80 dark:text-indigo-300/80 m-0 pt-1">
+                    Assigned employees can log in at <code className="px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/80 font-mono font-bold text-indigo-900 dark:text-indigo-200">/event-manager/login</code> to verify volunteers and track attendance.
+                  </p>
                 </div>
 
                 <div>

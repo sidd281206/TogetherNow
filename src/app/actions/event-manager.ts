@@ -353,6 +353,11 @@ export async function fetchAssignedEventsForManagerAction(employeeId: string, ph
                 return true
               }
             }
+            if (Array.isArray(meta.eventManagers)) {
+              if (meta.eventManagers.some((m: any) => m.employeeId?.trim().toUpperCase() === cleanCode)) {
+                return true
+              }
+            }
           }
         } catch {}
       }

@@ -755,14 +755,20 @@ export default function EventManagerDashboard({
                         <span className="px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-900 dark:text-indigo-200 font-mono font-bold text-[10px]">
                           {session.employeeId} (You)
                         </span>
-                        {otherManagers.map((code) => (
-                          <span
-                            key={code}
-                            className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-mono font-bold text-[10px]"
-                          >
-                            {code}
-                          </span>
-                        ))}
+                        {otherManagers.map((code) => {
+                          const matched = (op.eventManagers as any[])?.find?.(
+                            (m: any) => m.employeeId?.toUpperCase() === code.toUpperCase()
+                          )
+                          return (
+                            <span
+                              key={code}
+                              className="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-mono font-bold text-[10px]"
+                              title={matched?.name ? `${matched.name} (${matched.phone || ''})` : undefined}
+                            >
+                              {matched?.name ? `${matched.name} (${code})` : code}
+                            </span>
+                          )
+                        })}
                       </div>
                     </div>
 
