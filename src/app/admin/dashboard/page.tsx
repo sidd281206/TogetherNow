@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import AdminDashboardClient from './AdminDashboardClient'
-import { fetchAdminOrganizations } from '@/app/actions/admin'
+import { fetchAdminOrganizations, fetchAdminDonors } from '@/app/actions/admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +9,15 @@ export const metadata: Metadata = {
 }
 
 export default async function AdminDashboardPage() {
-  const dbOrganizations = await fetchAdminOrganizations()
-  return <AdminDashboardClient initialDbOrganizations={dbOrganizations} />
+  const [dbOrganizations, dbDonors] = await Promise.all([
+    fetchAdminOrganizations(),
+    fetchAdminDonors(),
+  ])
+  return (
+    <AdminDashboardClient 
+      initialDbOrganizations={dbOrganizations}
+      initialDbDonors={dbDonors}
+    />
+  )
 }
 

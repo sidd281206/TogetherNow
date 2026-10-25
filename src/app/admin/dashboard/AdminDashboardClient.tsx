@@ -1,7 +1,8 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { 
   Building2, 
   HeartHandshake, 
@@ -18,7 +19,8 @@ import {
   Sparkles,
   FileText,
   Mail,
-  Globe
+  Globe,
+  RotateCcw
 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { approveOrganizationAction, rejectOrganizationAction, approveDonorAction, rejectDonorAction } from '@/app/actions/admin'
@@ -100,16 +102,53 @@ const INITIAL_DONORS: PendingDonor[] = [
 
 interface AdminDashboardClientProps {
   initialDbOrganizations?: PendingOrg[]
+  initialDbDonors?: PendingDonor[]
 }
 
-export default function AdminDashboardClient({ initialDbOrganizations = [] }: AdminDashboardClientProps) {
+export default function AdminDashboardClient({ 
+  initialDbOrganizations = [],
+  initialDbDonors = [] 
+}: AdminDashboardClientProps) {
+  const router = useRouter()
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
   const [orgs, setOrgs] = useState<PendingOrg[]>(() => {
     if (initialDbOrganizations.length === 0) return INITIAL_ORGS
     const existingIds = new Set(initialDbOrganizations.map((o) => o.id))
     const fallbackFiltered = INITIAL_ORGS.filter((o) => !existingIds.has(o.id))
     return [...initialDbOrganizations, ...fallbackFiltered]
   })
-  const [donors, setDonors] = useState<PendingDonor[]>(INITIAL_DONORS)
+
+  const [donors, setDonors] = useState<PendingDonor[]>(() => {
+    if (initialDbDonors.length === 0) return INITIAL_DONORS
+    const existingIds = new Set(initialDbDonors.map((d) => d.id))
+    const fallbackFiltered = INITIAL_DONORS.filter((d) => !existingIds.has(d.id))
+    return [...initialDbDonors, ...fallbackFiltered]
+  })
+
+  // Sync state if server revalidates props
+  useEffect(() => {
+    if (initialDbOrganizations && initialDbOrganizations.length > 0) {
+      const existingIds = new Set(initialDbOrganizations.map((o) => o.id))
+      const fallbackFiltered = INITIAL_ORGS.filter((o) => !existingIds.has(o.id))
+      setOrgs([...initialDbOrganizations, ...fallbackFiltered])
+    }
+  }, [initialDbOrganizations])
+
+  useEffect(() => {
+    if (initialDbDonors && initialDbDonors.length > 0) {
+      const existingIds = new Set(initialDbDonors.map((d) => d.id))
+      const fallbackFiltered = INITIAL_DONORS.filter((d) => !existingIds.has(d.id))
+      setDonors([...initialDbDonors, ...fallbackFiltered])
+    }
+  }, [initialDbDonors])
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true)
+    router.refresh()
+    setTimeout(() => setIsRefreshing(false), 1200)
+  }
+
   const [activeTab, setActiveTab] = useState<'pending-orgs' | 'pending-donors' | 'approved-all'>('pending-orgs')
   const [actionNotice, setActionNotice] = useState<string | null>(null)
 
@@ -173,7 +212,18 @@ export default function AdminDashboardClient({ initialDbOrganizations = [] }: Ad
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold text-xs transition-all cursor-pointer shadow-2xs disabled:opacity-50"
+              title="Refresh verification requests from database"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
+            </button>
+
             <Link
               href="/admin/login"
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold text-xs transition-colors text-decoration-none"
