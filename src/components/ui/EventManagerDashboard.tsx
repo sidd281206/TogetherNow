@@ -43,6 +43,7 @@ import {
   markOpportunityCompletedAction,
   cancelOpportunityAction
 } from '@/app/actions/opportunities'
+import { getHighestBadge } from '@/lib/badges'
 import { Applicant, Opportunity, INITIAL_OPPORTUNITIES } from '@/components/ui/OpportunitiesFeed'
 
 interface EventManagerDashboardProps {
@@ -1033,6 +1034,13 @@ export default function EventManagerDashboard({
                     .slice(0, 2)
                     .toUpperCase()
 
+                  // Calculate candidate's overall volunteer hours and highest earned badge
+                  const candApps = applicants.filter(
+                    (a) => (a.volunteerId && a.volunteerId === cand.volunteerId) || (a.email && cand.email && a.email.toLowerCase() === cand.email.toLowerCase())
+                  )
+                  const candHours = Math.max(candApps.filter((a) => a.status === 'accepted').length * 4, cand.status === 'accepted' ? 4 : 1)
+                  const candBadge = getHighestBadge(candHours)
+
                   return (
                     <div
                       key={cand.id}
@@ -1100,6 +1108,18 @@ export default function EventManagerDashboard({
                                 </>
                               )}
                             </span>
+
+                            {/* Volunteer Categorized Milestone Badge */}
+                            {candBadge && (
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60"
+                                title={`${candBadge.category} Tier • ${candBadge.name} (${candHours} Total Volunteered Hours)`}
+                              >
+                                <span>{candBadge.glyph}</span>
+                                <span>{candBadge.name}</span>
+                                <span className="text-[9px] opacity-75 font-semibold">({candHours}h)</span>
+                              </span>
+                            )}
 
                             {isMarkedPresent && (
                               <div className="flex items-center gap-1.5 flex-wrap">

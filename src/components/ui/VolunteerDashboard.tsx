@@ -35,6 +35,8 @@ import { getOrgRatingSummary, hasVolunteerReviewedEvent } from '@/lib/ratings'
 import RecommendedOpportunitiesSection from '@/components/ui/RecommendedOpportunitiesSection'
 import ProfileCompletionModal from '@/components/ui/ProfileCompletionModal'
 import VolunteerPhotoPromptBanner from '@/components/ui/VolunteerPhotoPromptBanner'
+import VolunteerBadgesModal from '@/components/ui/VolunteerBadgesModal'
+import { getVolunteerBadges, getCurrentTierInfo, getHighestBadge } from '@/lib/badges'
 import { VolunteerPreferences } from '@/lib/recommendations'
 
 interface VolunteerDashboardProps {
@@ -113,6 +115,7 @@ export default function VolunteerDashboard({
   const [ratingEvent, setRatingEvent] = useState<{ op: Opportunity; app: Applicant } | null>(null)
   const [reviewedEventsMap, setReviewedEventsMap] = useState<Record<string, boolean>>({})
   const [showEditPreferencesModal, setShowEditPreferencesModal] = useState(false)
+  const [showBadgesModal, setShowBadgesModal] = useState(false)
 
   const [preferences, setPreferences] = useState<VolunteerPreferences>(() => {
     if (volunteerPreferences && (volunteerPreferences.skills.length > 0 || volunteerPreferences.interests.length > 0 || volunteerPreferences.city)) {
@@ -345,8 +348,15 @@ export default function VolunteerDashboard({
 
   const approvedDrives = userApplications.filter((a) => a.status === 'accepted')
   const pendingDrives = userApplications.filter((a) => a.status === 'pending')
-  const totalHours = approvedDrives.length * 4
-  const badgeCount = approvedDrives.length > 0 ? Math.min(5, approvedDrives.length) : 0
+  const attendedDrives = userApplications.filter(
+    (a) => a.status === 'accepted' && (a as any).attendance === 'present'
+  )
+  const totalHours = Math.max(attendedDrives.length * 4, approvedDrives.length * 4)
+  const badges = getVolunteerBadges(totalHours)
+  const earnedBadges = badges.filter((b) => b.earned)
+  const badgeCount = earnedBadges.length
+  const tierInfo = getCurrentTierInfo(totalHours)
+  const highestBadge = getHighestBadge(totalHours)
 
   const latestApprovalNotification = notifications.find((n) =>
     n.type === 'approval' && (
@@ -412,16 +422,43 @@ export default function VolunteerDashboard({
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-500 flex items-center justify-center font-bold text-xl shrink-0">
-            <Award className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="text-2xl font-black text-gray-900 dark:text-white leading-none">
-              {badgeCount} Badge{badgeCount !== 1 ? 's' : ''}
+        <div
+          onClick={() => setShowBadgesModal(true)}
+          className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs flex items-center justify-between gap-4 cursor-pointer hover:border-amber-300 dark:hover:border-amber-700/60 hover:shadow-md transition-all group"
+          role="button"
+          tabIndex={0}
+          title="Click to view all categorized milestone badges and progress"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-500 flex items-center justify-center font-bold text-xl shrink-0 group-hover:scale-105 transition-transform">
+              <Award className="w-6 h-6" />
             </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Impact Milestones</div>
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="text-2xl font-black text-gray-900 dark:text-white leading-none">
+                  {badgeCount} Badge{badgeCount !== 1 ? 's' : ''}
+                </div>
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-900/60">
+                  {tierInfo.currentTierEmoji} {tierInfo.currentTier}
+                </span>
+              </div>
+              <div className="text-xs text-amber-600 dark:text-amber-400 font-bold mt-1 flex items-center gap-1 group-hover:underline">
+                <span>View Badges & Tiers</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </div>
+            </div>
           </div>
+          {highestBadge && (
+            <div className="hidden sm:flex flex-col items-end text-right">
+              <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                Top Badge
+              </span>
+              <span className="text-xs font-black text-gray-800 dark:text-gray-200 flex items-center gap-1 mt-0.5">
+                <span>{highestBadge.glyph}</span>
+                <span>{highestBadge.name}</span>
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs flex items-center gap-4">
@@ -1016,6 +1053,14 @@ export default function VolunteerDashboard({
           }}
         />
       )}
+
+      {/* Volunteer Categorized Badges Modal */}
+      <VolunteerBadgesModal
+        isOpen={showBadgesModal}
+        onClose={() => setShowBadgesModal(false)}
+        totalHours={totalHours}
+        userName={userName}
+      />
     </div>
   )
 }
