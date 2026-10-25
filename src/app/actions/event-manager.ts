@@ -401,9 +401,13 @@ export async function markVolunteerAttendanceAction(payload: {
   applicantId?: string
   status: 'present' | 'absent' | 'unmarked'
   markedBy?: string
+  markedAt?: string
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const admin = getAdminClient()
+    const markedAtTimestamp = payload.status === 'present'
+      ? (payload.markedAt || new Date().toISOString())
+      : null
 
     // 1. Update applications table if applicantId or (eventId + volunteerId) matches
     try {
@@ -412,8 +416,8 @@ export async function markVolunteerAttendanceAction(payload: {
           .from('applications')
           .update({
             attendance_status: payload.status,
-            attendance_marked_at: new Date().toISOString(),
-            attendance_marked_by: payload.markedBy || 'Event Manager',
+            attendance_marked_at: markedAtTimestamp,
+            attendance_marked_by: payload.status === 'present' ? (payload.markedBy || 'Event Manager') : null,
           })
           .eq('id', payload.applicantId)
       } else {
@@ -421,8 +425,8 @@ export async function markVolunteerAttendanceAction(payload: {
           .from('applications')
           .update({
             attendance_status: payload.status,
-            attendance_marked_at: new Date().toISOString(),
-            attendance_marked_by: payload.markedBy || 'Event Manager',
+            attendance_marked_at: markedAtTimestamp,
+            attendance_marked_by: payload.status === 'present' ? (payload.markedBy || 'Event Manager') : null,
           })
           .eq('opportunity_id', payload.eventId)
           .eq('volunteer_id', payload.volunteerId)
@@ -437,8 +441,8 @@ export async function markVolunteerAttendanceAction(payload: {
         event_id: payload.eventId,
         volunteer_id: payload.volunteerId,
         status: payload.status,
-        marked_by: payload.markedBy || 'Event Manager',
-        marked_at: new Date().toISOString(),
+        marked_by: payload.status === 'present' ? (payload.markedBy || 'Event Manager') : null,
+        marked_at: markedAtTimestamp || new Date().toISOString(),
       }, { onConflict: 'event_id, volunteer_id' })
     } catch (attErr) {
       console.warn('Notice inserting into event_attendance:', attErr)

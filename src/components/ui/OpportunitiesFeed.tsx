@@ -112,6 +112,8 @@ export interface Applicant {
   appliedAt: string
   avatarUrl?: string
   attendance?: 'present' | 'absent' | 'unmarked'
+  attendanceMarkedAt?: string
+  attendanceMarkedBy?: string
 }
 
 function getGoogleMapsUrl(addressOrLocation: string): string {
@@ -1400,6 +1402,13 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         ? volunteerApplySkills.split(',').map((s) => s.trim()).filter(Boolean)
         : applyingEvent.skillsNeeded.slice(0, 2)
 
+      const volunteerAvatar =
+        (typeof window !== 'undefined'
+          ? (applicantEmail ? localStorage.getItem(`togethernow_user_avatar_${applicantEmail}`) : null) ||
+            (userEmail ? localStorage.getItem(`togethernow_user_avatar_${userEmail}`) : null) ||
+            (userId ? localStorage.getItem(`togethernow_user_avatar_${userId}`) : null)
+          : null) || undefined
+
       const newApp: Applicant = {
         id: `app-${Date.now()}`,
         eventId: applyingEvent.id,
@@ -1411,6 +1420,7 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         skills: parsedSkills,
         note: applicantNote,
         status: 'pending',
+        avatarUrl: volunteerAvatar,
         appliedAt: 'Just now',
       }
 
@@ -1422,6 +1432,9 @@ const OpportunitiesFeed = forwardRef<OpportunitiesFeedRef, OpportunitiesFeedProp
         try {
           // Write to global key (org reads from here to see all applicants)
           localStorage.setItem(APPLICANTS_STORAGE_KEY, JSON.stringify(updated))
+          try {
+            window.dispatchEvent(new CustomEvent('togethernow_applicants_updated', { detail: updated }))
+          } catch {}
 
           // Also write to user-scoped key(s)
           const keysToSave = new Set<string>()

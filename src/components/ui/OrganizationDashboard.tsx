@@ -48,6 +48,7 @@ import {
   fetchApplicantsAction,
   toggleApplicationsAction,
 } from '@/app/actions/opportunities'
+import { markVolunteerAttendanceAction } from '@/app/actions/event-manager'
 import { createClient } from '@/lib/supabase/client'
 import { pushNotification } from '@/lib/notifications'
 import OrganizationAboutModal from '@/components/ui/OrganizationAboutModal'
@@ -65,6 +66,38 @@ interface OrganizationDashboardProps {
 
 const STORAGE_KEY = 'togethernow_posted_opportunities'
 const APPLICANTS_STORAGE_KEY = 'togethernow_event_applicants_v1'
+
+function getVolunteerAvatarUrl(cand: { avatarUrl?: string; email?: string; volunteerId?: string }): string | null {
+  if (cand.avatarUrl && cand.avatarUrl.trim().length > 0) return cand.avatarUrl
+  if (typeof window !== 'undefined') {
+    if (cand.email) {
+      const stored = localStorage.getItem(`togethernow_user_avatar_${cand.email}`)
+      if (stored && stored.trim().length > 0) return stored
+    }
+    if (cand.volunteerId) {
+      const stored = localStorage.getItem(`togethernow_user_avatar_${cand.volunteerId}`)
+      if (stored && stored.trim().length > 0) return stored
+    }
+  }
+  return null
+}
+
+function formatAttendanceTime(isoOrStr?: string): string {
+  if (!isoOrStr) return ''
+  try {
+    const d = new Date(isoOrStr)
+    if (isNaN(d.getTime())) return isoOrStr
+    return d.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      month: 'short',
+      day: 'numeric',
+    })
+  } catch {
+    return isoOrStr
+  }
+}
 
 const DEFAULT_DRIVES: Opportunity[] = [
   {
@@ -185,7 +218,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
   
   // Selected Drive Detailed Candidate & Venue Inspection Modal
   const [inspectingDrive, setInspectingDrive] = useState<Opportunity | null>(null)
-  const [candidateFilter, setCandidateFilter] = useState<'all' | 'accepted' | 'pending' | 'declined'>('all')
+  const [candidateFilter, setCandidateFilter] = useState<'all' | 'accepted' | 'present' | 'pending' | 'declined'>('all')
   const [candidateSearch, setCandidateSearch] = useState('')
   const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>({})
 
@@ -318,6 +351,13 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
         const parsedApps: Applicant[] = JSON.parse(savedApps)
         if (Array.isArray(parsedApps)) {
           setApplicants(parsedApps)
+          const attObj: Record<string, boolean> = {}
+          parsedApps.forEach((a) => {
+            if (a.attendance === 'present') {
+              attObj[a.id] = true
+            }
+          })
+          setAttendanceMap(attObj)
         }
       }
     } catch (e) {
@@ -378,6 +418,15 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
           try {
             localStorage.setItem(APPLICANTS_STORAGE_KEY, JSON.stringify(merged))
           } catch {}
+
+          const attObj: Record<string, boolean> = {}
+          merged.forEach((a) => {
+            if (a.attendance === 'present') {
+              attObj[a.id] = true
+            }
+          })
+          setAttendanceMap(attObj)
+
           return merged
         })
       }
@@ -425,12 +474,30 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
       syncWithDb()
     }
 
+    const handleApplicantsUpdate = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setApplicants(e.detail)
+        const attObj: Record<string, boolean> = {}
+        e.detail.forEach((a: Applicant) => {
+          if (a.attendance === 'present') {
+            attObj[a.id] = true
+          }
+        })
+        setAttendanceMap(attObj)
+      } else {
+        loadData()
+        syncWithDb()
+      }
+    }
+
     window.addEventListener('togethernow_opportunities_updated', handleUpdate)
+    window.addEventListener('togethernow_applicants_updated', handleApplicantsUpdate)
+    window.addEventListener('togethernow_avatar_updated', handleFocusSync)
     window.addEventListener('togethernow_new_notification', handleFocusSync)
     window.addEventListener('storage', handleFocusSync)
     window.addEventListener('focus', handleFocusSync)
 
-    // Supabase realtime channel to receive live updates when seats or applicants change globally
+    // Supabase realtime channel to receive live updates when seats, applicants, or attendance changes globally
     const supabase = createClient()
     const channel = supabase
       .channel('org-dashboard-global-sync')
@@ -438,6 +505,9 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
         syncWithDb()
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
+        syncWithDb()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'event_attendance' }, () => {
         syncWithDb()
       })
       .subscribe()
@@ -448,6 +518,8 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
 
     return () => {
       window.removeEventListener('togethernow_opportunities_updated', handleUpdate)
+      window.removeEventListener('togethernow_applicants_updated', handleApplicantsUpdate)
+      window.removeEventListener('togethernow_avatar_updated', handleFocusSync)
       window.removeEventListener('togethernow_new_notification', handleFocusSync)
       window.removeEventListener('storage', handleFocusSync)
       window.removeEventListener('focus', handleFocusSync)
@@ -465,6 +537,14 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     .filter((op) => !op.isCancelled)
     .reduce((acc, op) => acc + (op.alreadyRegistered ?? 0), 0)
   const totalCommunityHours = totalVolunteersRegistered * 4
+
+  const totalConfirmedVolunteers = applicants.filter((a) => a.status === 'accepted').length
+  const totalCheckedInVolunteers = applicants.filter(
+    (a) => a.status === 'accepted' && Boolean(attendanceMap[a.id] || a.attendance === 'present')
+  ).length
+  const overallAttendanceRate = totalConfirmedVolunteers > 0
+    ? Math.round((totalCheckedInVolunteers / totalConfirmedVolunteers) * 100)
+    : 0
 
   // Filter drives in the "All Drives" modal
   const currentBucketDrives = 
@@ -496,11 +576,20 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     ? applicants.filter((a) => a.eventId === inspectingDrive.id)
     : []
 
+  const acceptedCandidatesCount = driveCandidates.filter((c) => c.status === 'accepted').length
+  const pendingCandidatesCount = driveCandidates.filter((c) => c.status === 'pending').length
+  const declinedCandidatesCount = driveCandidates.filter((c) => c.status === 'declined').length
+  const presentCandidatesCount = driveCandidates.filter(
+    (c) => c.status === 'accepted' && Boolean(attendanceMap[c.id] || c.attendance === 'present')
+  ).length
+
   const filteredDriveCandidates = driveCandidates.filter((cand) => {
-    const matchesStatus =
-      candidateFilter === 'all'
-        ? true
-        : cand.status === candidateFilter
+    const isPresent = Boolean(attendanceMap[cand.id] || cand.attendance === 'present')
+
+    if (candidateFilter === 'pending' && cand.status !== 'pending') return false
+    if (candidateFilter === 'accepted' && cand.status !== 'accepted') return false
+    if (candidateFilter === 'declined' && cand.status !== 'declined') return false
+    if (candidateFilter === 'present' && (!isPresent || cand.status !== 'accepted')) return false
 
     const matchesSearch =
       !candidateSearch.trim() ||
@@ -509,12 +598,8 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
       (cand.phone && cand.phone.toLowerCase().includes(candidateSearch.toLowerCase())) ||
       cand.skills.some((s) => s.toLowerCase().includes(candidateSearch.toLowerCase()))
 
-    return matchesStatus && matchesSearch
+    return matchesSearch
   })
-
-  const acceptedCandidatesCount = driveCandidates.filter((c) => c.status === 'accepted').length
-  const pendingCandidatesCount = driveCandidates.filter((c) => c.status === 'pending').length
-  const declinedCandidatesCount = driveCandidates.filter((c) => c.status === 'declined').length
 
   const handleCandidateStatus = (candidateId: string, status: 'accepted' | 'declined') => {
     if (!inspectingDrive) return
@@ -636,11 +721,45 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
     }).catch((err) => console.warn('Notice saving applicant status:', err))
   }
 
-  const toggleAttendance = (candidateId: string) => {
+  const toggleAttendance = async (cand: Applicant) => {
+    if (!inspectingDrive) return
+    const current = Boolean(attendanceMap[cand.id] || cand.attendance === 'present')
+    const nextStatus: 'present' | 'absent' = current ? 'absent' : 'present'
+    const timestamp = nextStatus === 'present' ? new Date().toISOString() : undefined
+    const markedBy = nextStatus === 'present' ? `${organizationName || 'Organization Admin'} (Organizer)` : undefined
+
     setAttendanceMap((prev) => ({
       ...prev,
-      [candidateId]: !prev[candidateId],
+      [cand.id]: nextStatus === 'present',
     }))
+
+    const updated = applicants.map((a) =>
+      a.id === cand.id ? { 
+        ...a, 
+        attendance: nextStatus,
+        attendanceMarkedAt: timestamp,
+        attendanceMarkedBy: markedBy,
+      } : a
+    )
+    setApplicants(updated)
+
+    try {
+      localStorage.setItem(APPLICANTS_STORAGE_KEY, JSON.stringify(updated))
+      window.dispatchEvent(new CustomEvent('togethernow_applicants_updated', { detail: updated }))
+    } catch {}
+
+    try {
+      await markVolunteerAttendanceAction({
+        eventId: inspectingDrive.id,
+        volunteerId: cand.volunteerId || cand.id,
+        applicantId: cand.id,
+        status: nextStatus,
+        markedBy: `${organizationName || 'Organization Admin'} (Organizer)`,
+        markedAt: timestamp,
+      })
+    } catch (err) {
+      console.warn('Notice marking attendance in DB:', err)
+    }
   }
 
   // Cancel Event
@@ -872,16 +991,20 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
       alert('No approved volunteers to export yet. Approve applicants to build your finalized roster.')
       return
     }
-    const headers = ['#', 'Volunteer Name', 'Phone Number', 'Email Address', 'Verified Skills', 'Applied Date', 'Attendance Status']
-    const rows = finalizedVolunteers.map((v, idx) => [
-      idx + 1,
-      `"${(v.name || 'Volunteer').replace(/"/g, '""')}"`,
-      `"${(v.phone || 'N/A').replace(/"/g, '""')}"`,
-      `"${(v.email || 'N/A').replace(/"/g, '""')}"`,
-      `"${(v.skills?.join(', ') || 'N/A').replace(/"/g, '""')}"`,
-      `"${(v.appliedAt || 'N/A').replace(/"/g, '""')}"`,
-      `"${attendanceMap[v.id] ? 'Present' : 'Confirmed'}"`
-    ])
+    const headers = ['#', 'Volunteer Name', 'Phone Number', 'Email Address', 'Verified Skills', 'Applied Date', 'Attendance Status', 'Attendance Timestamp']
+    const rows = finalizedVolunteers.map((v, idx) => {
+      const isPres = Boolean(attendanceMap[v.id] || v.attendance === 'present')
+      return [
+        idx + 1,
+        `"${(v.name || 'Volunteer').replace(/"/g, '""')}"`,
+        `"${(v.phone || 'N/A').replace(/"/g, '""')}"`,
+        `"${(v.email || 'N/A').replace(/"/g, '""')}"`,
+        `"${(v.skills?.join(', ') || 'N/A').replace(/"/g, '""')}"`,
+        `"${(v.appliedAt || 'N/A').replace(/"/g, '""')}"`,
+        `"${isPres ? 'Present' : 'Confirmed'}"`,
+        `"${isPres && v.attendanceMarkedAt ? formatAttendanceTime(v.attendanceMarkedAt) : '-'}"`,
+      ]
+    })
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -939,22 +1062,25 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                 <th>Phone</th>
                 <th>Email</th>
                 <th>Skills</th>
-                <th class="check-col">Present [✓]</th>
+                <th class="check-col">Attendance & Time</th>
                 <th class="sig-col">Volunteer Signature</th>
               </tr>
             </thead>
             <tbody>
-              ${finalizedVolunteers.map((v, i) => `
+              ${finalizedVolunteers.map((v, i) => {
+                const isPres = Boolean(attendanceMap[v.id] || v.attendance === 'present')
+                return `
                 <tr>
                   <td>${i + 1}</td>
                   <td><strong>${v.name}</strong></td>
                   <td>${v.phone || 'N/A'}</td>
                   <td>${v.email || 'N/A'}</td>
                   <td>${v.skills?.join(', ') || '-'}</td>
-                  <td class="check-col">[ &nbsp;&nbsp; ]</td>
+                  <td class="check-col">${isPres ? `[ ✓ ] ${v.attendanceMarkedAt ? formatAttendanceTime(v.attendanceMarkedAt) : 'Present'}` : '[ &nbsp;&nbsp; ]'}</td>
                   <td class="sig-col"></td>
                 </tr>
-              `).join('')}
+              `
+              }).join('')}
             </tbody>
           </table>
           <script>
@@ -983,7 +1109,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
   return (
     <div suppressHydrationWarning className="space-y-8">
       {/* Organization Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
         {/* TOTAL DRIVES CARD (WITH "SEE MORE" OPTION) */}
         <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs flex flex-col justify-between group hover:border-emerald-300 dark:hover:border-emerald-800 transition-all">
@@ -1046,6 +1172,31 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
             <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               Volunteers Registered
             </div>
+          </div>
+        </div>
+
+        {/* VOLUNTEERS CHECKED IN / ATTENDANCE RECORD CARD */}
+        <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs flex items-center justify-between group hover:border-emerald-300 dark:hover:border-emerald-800 transition-all">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xl shrink-0">
+              <UserCheck className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="text-2xl font-black text-gray-900 dark:text-white leading-none">
+                {totalCheckedInVolunteers}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Volunteers Checked In
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col items-end">
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+              {overallAttendanceRate}% Rate
+            </span>
+            <span className="text-[10px] text-gray-400 mt-1 font-medium">
+              {totalCheckedInVolunteers}/{totalConfirmedVolunteers || 0} Confirmed
+            </span>
           </div>
         </div>
 
@@ -1368,6 +1519,9 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                   const evCandidates = applicants.filter((a) => a.eventId === drive.id)
                   const evAccepted = evCandidates.filter((a) => a.status === 'accepted').length
                   const evPending = evCandidates.filter((a) => a.status === 'pending').length
+                  const evPresent = evCandidates.filter(
+                    (a) => a.status === 'accepted' && Boolean(attendanceMap[a.id] || a.attendance === 'present')
+                  ).length
                   const totalReq = drive.totalRequired ?? (drive.spotsLeft + (drive.alreadyRegistered ?? 0))
                   const percentFilled = Math.min(100, Math.round(((drive.alreadyRegistered ?? 0) / Math.max(1, totalReq)) * 100))
 
@@ -1441,11 +1595,15 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
 
                         {/* Right Capacity / Stats Block */}
                         {!drive.isCancelled && (
-                          <div className="w-full sm:w-64 shrink-0 flex flex-col gap-1.5 sm:items-end justify-center">
-                            <div className="flex items-center gap-1.5">
+                          <div className="w-full sm:w-72 shrink-0 flex flex-col gap-1.5 sm:items-end justify-center">
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
                               <span className="px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-100 dark:border-indigo-900/50 flex items-center gap-1">
                                 <Users className="w-3.5 h-3.5" />
                                 <span>{evAccepted} Confirmed</span>
+                              </span>
+                              <span className="px-2.5 py-1 rounded-xl bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold text-xs border border-emerald-200 dark:border-emerald-800 flex items-center gap-1 shadow-2xs">
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>{evPresent} / {evAccepted} Checked In</span>
                               </span>
                               {evPending > 0 && (
                                 <span className="px-2 py-1 rounded-xl bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold text-[11px]">
@@ -1835,6 +1993,42 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
               </div>
             </div>
 
+            {/* Attendance & Stats Highlights Bar */}
+            <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/70 dark:bg-emerald-950/40 p-3.5 rounded-2xl border border-emerald-100 dark:border-emerald-900/40 my-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold">
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-extrabold text-sm text-emerald-950 dark:text-emerald-200">
+                    Live Attendance: {presentCandidatesCount} of {acceptedCandidatesCount} Confirmed Volunteers Present
+                  </div>
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300 m-0">
+                    Click <strong>&quot;Mark Present&quot;</strong> on each volunteer card to record or verify check-in.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => handleExportCsv(inspectingDrive.title, driveCandidates.filter((c) => c.status === 'accepted'))}
+                  className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-800 text-emerald-700 dark:text-emerald-300 font-bold text-xs border border-emerald-200 dark:border-emerald-800 cursor-pointer flex items-center gap-1.5 shadow-2xs hover:bg-emerald-50"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePrintRoster(inspectingDrive, driveCandidates.filter((c) => c.status === 'accepted'))}
+                  className="px-3 py-1.5 rounded-xl bg-white dark:bg-gray-800 text-emerald-700 dark:text-emerald-300 font-bold text-xs border border-emerald-200 dark:border-emerald-800 cursor-pointer flex items-center gap-1.5 shadow-2xs hover:bg-emerald-50"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Roster</span>
+                </button>
+              </div>
+            </div>
+
             {/* Candidate Filter Tabs & Search */}
             <div className="py-2.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 border-y border-gray-100 dark:border-gray-800">
               <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
@@ -1844,8 +2038,9 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                     : []),
                   { key: 'all', label: `All Candidates (${driveCandidates.length})` },
                   ...(!inspectingDrive.isApplicationsClosed
-                    ? [{ key: 'accepted', label: `Present / Approved (${acceptedCandidatesCount})` }]
+                    ? [{ key: 'accepted', label: `Confirmed (${acceptedCandidatesCount})` }]
                     : []),
+                  { key: 'present', label: `✓ Checked In / Present (${presentCandidatesCount})` },
                   { key: 'pending', label: `Pending (${pendingCandidatesCount})` },
                   { key: 'declined', label: `Declined (${declinedCandidatesCount})` },
                 ].map((tab) => (
@@ -1855,7 +2050,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                     onClick={() => setCandidateFilter(tab.key as any)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${
                       candidateFilter === tab.key
-                        ? 'bg-indigo-600 text-white shadow-xs'
+                        ? 'bg-emerald-600 text-white shadow-xs'
                         : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
                     }`}
                   >
@@ -1871,7 +2066,7 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                   value={candidateSearch}
                   onChange={(e) => setCandidateSearch(e.target.value)}
                   placeholder="Search candidate..."
-                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
             </div>
@@ -1882,12 +2077,13 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                 <div className="text-center py-10 px-4 bg-gray-50 dark:bg-gray-800/40 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700">
                   <Users className="w-8 h-8 text-gray-400 mx-auto mb-2 opacity-60" />
                   <p className="text-xs font-bold text-gray-700 dark:text-gray-300 m-0">
-                    No candidates found for this drive
+                    No candidates found for this filter
                   </p>
                 </div>
               ) : (
                 filteredDriveCandidates.map((cand) => {
-                  const isMarkedPresent = attendanceMap[cand.id] ?? (cand.status === 'accepted')
+                  const isMarkedPresent = Boolean(attendanceMap[cand.id] || cand.attendance === 'present')
+                  const avatarSrc = getVolunteerAvatarUrl(cand)
 
                   const candInitials = cand.name
                     .split(' ')
@@ -1900,25 +2096,42 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                     <div
                       key={cand.id}
                       className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 ${
-                        cand.status === 'accepted'
-                          ? 'bg-emerald-50/30 dark:bg-emerald-950/20 border-emerald-200/70 dark:border-emerald-800/50'
+                        isMarkedPresent
+                          ? 'bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-300/80 dark:border-emerald-700/60 shadow-xs'
+                          : cand.status === 'accepted'
+                          ? 'bg-white dark:bg-gray-800/80 border-gray-200 dark:border-gray-700 shadow-xs'
                           : cand.status === 'declined'
                           ? 'bg-rose-50/30 dark:bg-rose-950/20 border-rose-200/70 dark:border-rose-800/50'
-                          : 'bg-white dark:bg-gray-800/60 border-gray-100 dark:border-gray-800 shadow-xs'
+                          : 'bg-amber-50/30 dark:bg-amber-950/20 border-amber-200/60'
                       }`}
                     >
-                      <div className="flex items-center gap-3 flex-1">
-                        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-xs shadow-xs shrink-0 overflow-hidden ring-2 ring-indigo-200/50">
-                          {cand.avatarUrl ? (
-                            <img src={cand.avatarUrl} alt={cand.name} className="w-full h-full object-cover" />
-                          ) : (
-                            candInitials
+                      <div className="flex items-center gap-3.5 flex-1 min-w-0">
+                        {/* Volunteer Photo Icon */}
+                        <div className="relative shrink-0">
+                          <div className="w-12 h-12 rounded-full overflow-hidden ring-2 ring-emerald-400/40 dark:ring-emerald-500/40 shadow-xs bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-sm">
+                            {avatarSrc ? (
+                              <img
+                                src={avatarSrc}
+                                alt={cand.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <span>{candInitials}</span>
+                            )}
+                          </div>
+                          {isMarkedPresent && (
+                            <span
+                              className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-emerald-600 text-white rounded-full flex items-center justify-center ring-2 ring-white dark:ring-gray-900 shadow-xs"
+                              title="Marked Present / Checked In"
+                            >
+                              <Check className="w-2.5 h-2.5 stroke-[3]" />
+                            </span>
                           )}
                         </div>
 
-                        <div className="space-y-1.5 flex-1">
-                          <div className="flex items-center gap-2">
-                            <h5 className="font-extrabold text-sm text-gray-900 dark:text-white m-0">
+                        <div className="space-y-1.5 flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h5 className="font-extrabold text-sm text-gray-900 dark:text-white m-0 truncate">
                               {cand.name}
                             </h5>
 
@@ -1947,18 +2160,28 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
                           </span>
 
                           {cand.status === 'accepted' && (
-                            <button
-                              type="button"
-                              onClick={() => toggleAttendance(cand.id)}
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold border-none cursor-pointer transition-all ${
-                                isMarkedPresent
-                                  ? 'bg-indigo-600 text-white shadow-xs'
-                                  : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                              }`}
-                              title="Click to toggle attendance check"
-                            >
-                              {isMarkedPresent ? '✓ Marked Present' : 'Mark Present'}
-                            </button>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => toggleAttendance(cand)}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border-none cursor-pointer transition-all flex items-center gap-1 ${
+                                  isMarkedPresent
+                                    ? 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700'
+                                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                                }`}
+                                title="Click to toggle attendance check"
+                              >
+                                <Check className="w-2.5 h-2.5 stroke-[3]" />
+                                <span>{isMarkedPresent ? '✓ Marked Present' : 'Mark Present'}</span>
+                              </button>
+
+                              {isMarkedPresent && cand.attendanceMarkedAt && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold border border-emerald-300 dark:border-emerald-800">
+                                  <Clock className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                  <span>Checked in {formatAttendanceTime(cand.attendanceMarkedAt)}</span>
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
 

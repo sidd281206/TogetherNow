@@ -63,6 +63,23 @@ function getGoogleMapsUrl(addressOrLocation: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressOrLocation)}`
 }
 
+function formatAttendanceTime(isoOrStr?: string): string {
+  if (!isoOrStr) return ''
+  try {
+    const d = new Date(isoOrStr)
+    if (isNaN(d.getTime())) return isoOrStr
+    return d.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      month: 'short',
+      day: 'numeric',
+    })
+  } catch {
+    return isoOrStr
+  }
+}
+
 export default function VolunteerDashboard({
   opportunitiesRef,
   userId,
@@ -661,6 +678,22 @@ export default function VolunteerDashboard({
                       </div>
                     ) : app.status === 'accepted' ? (
                       <div className="space-y-2">
+                        {app.attendance === 'present' && (
+                          <div className="text-[11px] text-emerald-950 dark:text-emerald-200 font-bold flex items-center justify-between bg-emerald-100 dark:bg-emerald-900/50 p-2.5 rounded-xl border border-emerald-300 dark:border-emerald-700 shadow-2xs">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                              <span>
+                                ✓ Attendance Recorded: Marked Present
+                                {app.attendanceMarkedAt ? ` at ${formatAttendanceTime(app.attendanceMarkedAt)}` : ''}
+                                {app.attendanceMarkedBy ? ` by ${app.attendanceMarkedBy}` : ' by Coordinator'}
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md bg-emerald-600 text-white tracking-wide">
+                              Attended
+                            </span>
+                          </div>
+                        )}
+
                         <div className="text-[11px] text-emerald-800 dark:text-emerald-300 font-semibold flex items-center justify-between bg-emerald-100/70 dark:bg-emerald-950/70 p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800/60">
                           <div className="flex items-center gap-1.5">
                             <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />

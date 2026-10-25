@@ -490,6 +490,8 @@ export interface DbApplicantRecord {
   appliedAt: string
   avatarUrl?: string
   attendance?: 'present' | 'absent' | 'unmarked'
+  attendanceMarkedAt?: string
+  attendanceMarkedBy?: string
 }
 
 export async function submitVolunteerApplicationAction(payload: {
@@ -727,14 +729,18 @@ export async function fetchApplicantsAction(): Promise<DbApplicantRecord[]> {
     }
 
     // Fetch attendance records from event_attendance
-    const attendanceMap = new Map<string, 'present' | 'absent'>()
+    const attendanceMap = new Map<string, { status: 'present' | 'absent'; markedAt?: string; markedBy?: string }>()
     try {
       const { data: attData } = await adminClient
         .from('event_attendance')
-        .select('event_id, volunteer_id, status')
+        .select('event_id, volunteer_id, status, marked_at, marked_by')
       if (attData) {
         attData.forEach((att) => {
-          attendanceMap.set(`${att.event_id}_${att.volunteer_id}`, att.status as any)
+          attendanceMap.set(`${att.event_id}_${att.volunteer_id}`, {
+            status: att.status as any,
+            markedAt: att.marked_at,
+            markedBy: att.marked_by,
+          })
         })
       }
     } catch (attErr) {
@@ -748,7 +754,10 @@ export async function fetchApplicantsAction(): Promise<DbApplicantRecord[]> {
         a.status === 'accepted' ? 'accepted' : a.status === 'rejected' ? 'declined' : 'pending'
       const avatarUrl = profileAvatarMap.get(a.volunteer_id) || uInfo?.avatarUrl || ''
       const attKey = `${a.opportunity_id}_${a.volunteer_id}`
-      const attendance = (a.attendance_status as any) || attendanceMap.get(attKey) || 'unmarked'
+      const attRecord = attendanceMap.get(attKey)
+      const attendance = (a.attendance_status as any) || attRecord?.status || 'unmarked'
+      const attendanceMarkedAt = a.attendance_marked_at || attRecord?.markedAt || undefined
+      const attendanceMarkedBy = a.attendance_marked_by || attRecord?.markedBy || undefined
 
       return {
         id: a.id,
@@ -763,6 +772,8 @@ export async function fetchApplicantsAction(): Promise<DbApplicantRecord[]> {
         status,
         avatarUrl,
         attendance,
+        attendanceMarkedAt,
+        attendanceMarkedBy,
         appliedAt: a.applied_at
           ? new Date(a.applied_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
           : 'Recently',

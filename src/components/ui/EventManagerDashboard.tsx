@@ -59,6 +59,38 @@ function getGoogleMapsUrl(addressOrLocation: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressOrLocation)}`
 }
 
+function getVolunteerAvatarUrl(cand: { avatarUrl?: string; email?: string; volunteerId?: string }): string | null {
+  if (cand.avatarUrl && cand.avatarUrl.trim().length > 0) return cand.avatarUrl
+  if (typeof window !== 'undefined') {
+    if (cand.email) {
+      const stored = localStorage.getItem(`togethernow_user_avatar_${cand.email}`)
+      if (stored && stored.trim().length > 0) return stored
+    }
+    if (cand.volunteerId) {
+      const stored = localStorage.getItem(`togethernow_user_avatar_${cand.volunteerId}`)
+      if (stored && stored.trim().length > 0) return stored
+    }
+  }
+  return null
+}
+
+function formatAttendanceTime(isoOrStr?: string): string {
+  if (!isoOrStr) return ''
+  try {
+    const d = new Date(isoOrStr)
+    if (isNaN(d.getTime())) return isoOrStr
+    return d.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      month: 'short',
+      day: 'numeric',
+    })
+  } catch {
+    return isoOrStr
+  }
+}
+
 export default function EventManagerDashboard({
   session,
   initialActiveEvents = [],
@@ -166,12 +198,14 @@ export default function EventManagerDashboard({
 
     window.addEventListener('togethernow_opportunities_updated', handleSync)
     window.addEventListener('togethernow_applicants_updated', handleSync)
+    window.addEventListener('togethernow_avatar_updated', handleSync)
     window.addEventListener('storage', handleSync)
     window.addEventListener('focus', handleSync)
 
     return () => {
       window.removeEventListener('togethernow_opportunities_updated', handleSync)
       window.removeEventListener('togethernow_applicants_updated', handleSync)
+      window.removeEventListener('togethernow_avatar_updated', handleSync)
       window.removeEventListener('storage', handleSync)
       window.removeEventListener('focus', handleSync)
     }
@@ -239,6 +273,8 @@ export default function EventManagerDashboard({
     if (!managingEvent) return
     const current = Boolean(attendanceMap[cand.id] || cand.attendance === 'present')
     const nextStatus: 'present' | 'absent' = current ? 'absent' : 'present'
+    const timestamp = nextStatus === 'present' ? new Date().toISOString() : undefined
+    const markedBy = nextStatus === 'present' ? `${session.name} (${session.employeeId})` : undefined
 
     setAttendanceMap((prev) => ({
       ...prev,
@@ -246,7 +282,12 @@ export default function EventManagerDashboard({
     }))
 
     const updated = applicants.map((a) =>
-      a.id === cand.id ? { ...a, attendance: nextStatus } : a
+      a.id === cand.id ? { 
+        ...a, 
+        attendance: nextStatus,
+        attendanceMarkedAt: timestamp,
+        attendanceMarkedBy: markedBy,
+      } : a
     )
     setApplicants(updated)
 
@@ -262,6 +303,7 @@ export default function EventManagerDashboard({
         applicantId: cand.id,
         status: nextStatus,
         markedBy: `${session.name} (${session.employeeId})`,
+        markedAt: timestamp,
       })
     } catch (err) {
       console.warn('Notice marking attendance in DB:', err)
@@ -444,15 +486,19 @@ export default function EventManagerDashboard({
       return
     }
 
-    const headers = ['Volunteer Name', 'Email', 'Phone', 'Skills', 'Attendance Status', 'Applied Date']
-    const rows = finalizedList.map((v) => [
-      `"${v.name.replace(/"/g, '""')}"`,
-      `"${v.email}"`,
-      `"${v.phone || ''}"`,
-      `"${v.skills.join(', ')}"`,
-      `"${attendanceMap[v.id] || v.attendance === 'present' ? 'PRESENT' : 'ABSENT / UNMARKED'}"`,
-      `"${v.appliedAt}"`,
-    ])
+    const headers = ['Volunteer Name', 'Email', 'Phone', 'Skills', 'Attendance Status', 'Attendance Timestamp', 'Applied Date']
+    const rows = finalizedList.map((v) => {
+      const isPres = Boolean(attendanceMap[v.id] || v.attendance === 'present')
+      return [
+        `"${v.name.replace(/"/g, '""')}"`,
+        `"${v.email}"`,
+        `"${v.phone || ''}"`,
+        `"${v.skills.join(', ')}"`,
+        `"${isPres ? 'PRESENT' : 'ABSENT / UNMARKED'}"`,
+        `"${isPres && v.attendanceMarkedAt ? formatAttendanceTime(v.attendanceMarkedAt) : '-'}"`,
+        `"${v.appliedAt}"`,
+      ]
+    })
 
     const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -507,25 +553,28 @@ export default function EventManagerDashboard({
               <th>Volunteer Name</th>
               <th>Contact Phone</th>
               <th>Email</th>
-              <th>Attendance Status</th>
+              <th>Attendance Status & Time</th>
               <th>Signature</th>
             </tr>
           </thead>
           <tbody>
             ${finalizedList
               .map(
-                (v, idx) => `
+                (v, idx) => {
+                  const isPres = Boolean(attendanceMap[v.id] || v.attendance === 'present')
+                  return `
                 <tr>
                   <td>${idx + 1}</td>
                   <td><strong>${v.name}</strong></td>
                   <td>${v.phone || 'N/A'}</td>
                   <td>${v.email}</td>
-                  <td class="${attendanceMap[v.id] || v.attendance === 'present' ? 'present' : ''}">
-                    ${attendanceMap[v.id] || v.attendance === 'present' ? '✓ PRESENT' : 'UNMARKED'}
+                  <td class="${isPres ? 'present' : ''}">
+                    ${isPres ? `✓ PRESENT ${v.attendanceMarkedAt ? `(${formatAttendanceTime(v.attendanceMarkedAt)})` : ''}` : 'UNMARKED'}
                   </td>
                   <td>__________________</td>
                 </tr>
               `
+                }
               )
               .join('')}
           </tbody>
@@ -976,6 +1025,7 @@ export default function EventManagerDashboard({
               ) : (
                 filteredCandidates.map((cand) => {
                   const isMarkedPresent = Boolean(attendanceMap[cand.id] || cand.attendance === 'present')
+                  const avatarSrc = getVolunteerAvatarUrl(cand)
                   const initials = cand.name
                     .split(' ')
                     .map((n) => n[0])
@@ -1001,9 +1051,9 @@ export default function EventManagerDashboard({
                         {/* Volunteer Photo Icon */}
                         <div className="relative shrink-0">
                           <div className="w-12 h-12 rounded-full overflow-hidden ring-2 ring-indigo-400/30 dark:ring-indigo-500/40 shadow-xs bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-sm">
-                            {cand.avatarUrl ? (
+                            {avatarSrc ? (
                               <img
-                                src={cand.avatarUrl}
+                                src={avatarSrc}
                                 alt={cand.name}
                                 className="w-full h-full object-cover"
                               />
@@ -1052,9 +1102,17 @@ export default function EventManagerDashboard({
                             </span>
 
                             {isMarkedPresent && (
-                              <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-black uppercase tracking-wider shadow-xs">
-                                ✓ Present
-                              </span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-black uppercase tracking-wider shadow-xs">
+                                  ✓ Present
+                                </span>
+                                {cand.attendanceMarkedAt && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold border border-emerald-300 dark:border-emerald-800">
+                                    <Clock className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                    <span>Checked in {formatAttendanceTime(cand.attendanceMarkedAt)}</span>
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
 
