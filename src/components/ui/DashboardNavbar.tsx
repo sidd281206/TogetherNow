@@ -18,7 +18,8 @@ import {
   Users,
   Trash2,
   X,
-  Building2
+  Building2,
+  Heart
 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { logoutAction } from '@/app/actions/auth'
@@ -203,6 +204,26 @@ export default function DashboardNavbar({
             >
               <PlusCircle className="w-4 h-4" />
               <span>Post Event</span>
+            </button>
+          )}
+
+          {/* Raise Funds Button for Organization */}
+          {role === 'organization' && (
+            <button
+              type="button"
+              onClick={() => {
+                const btn = document.getElementById('raise-funds-btn')
+                if (btn) {
+                  btn.click()
+                  btn.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                } else {
+                  document.getElementById('org-fundraising-section')?.scrollIntoView({ behavior: 'smooth' })
+                }
+              }}
+              className="hidden md:flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 rounded-full text-xs font-bold border border-rose-200 dark:border-rose-800 transition-all cursor-pointer shadow-xs"
+            >
+              <Heart className="w-3.5 h-3.5 text-rose-600 fill-rose-600" />
+              <span>Raise Funds</span>
             </button>
           )}
 

@@ -9,7 +9,7 @@ import DonorDashboard, { DonorDashboardRef } from '@/components/ui/DonorDashboar
 import OrgFundraisingPanel from '@/components/ui/OrgFundraisingPanel'
 import OrgEmployeesPanel from '@/components/ui/OrgEmployeesPanel'
 import { OpportunitiesFeedRef } from '@/components/ui/OpportunitiesFeed'
-import { Check, CheckCircle2, User, SlidersHorizontal } from 'lucide-react'
+import { Check, CheckCircle2, User, SlidersHorizontal, Heart } from 'lucide-react'
 import ResubmitApplicationButton from '@/components/ui/ResubmitApplicationButton'
 import ProfileCompletionModal from '@/components/ui/ProfileCompletionModal'
 
@@ -153,6 +153,27 @@ export default function DashboardClient({
               <span>My Profile & Skills</span>
             </button>
           )}
+
+          {/* Quick Raise Funds Action for Organizations */}
+          {role === 'organization' && (
+            <button
+              type="button"
+              onClick={() => {
+                const btn = document.getElementById('raise-funds-btn')
+                if (btn) {
+                  btn.click()
+                  btn.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                } else {
+                  document.getElementById('org-fundraising-section')?.scrollIntoView({ behavior: 'smooth' })
+                }
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-black transition-all shadow-md hover:shadow-lg cursor-pointer border-none group"
+              title="Launch a fundraising campaign for your cause"
+            >
+              <Heart className="w-4 h-4 text-rose-200 fill-rose-200 group-hover:scale-110 transition-transform" />
+              <span>Raise Funds</span>
+            </button>
+          )}
         </div>
 
         {/* Dynamic Profile Prompt Banner (New Users vs Existing Incomplete Users) */}
@@ -194,10 +215,20 @@ export default function DashboardClient({
         {/* Dashboard Feed based on role */}
         {role === 'organization' ? (
           <>
+            {/* Fundraising Campaigns & Raise Funds Option - Displayed prominently at top of Organization Dashboard */}
+            <div id="org-fundraising-section">
+              <OrgFundraisingPanel
+                orgStatus={profileStatus.orgStatus}
+                organizationName={organizationName}
+                myCampaigns={myCampaigns}
+              />
+            </div>
+
             <OrgEmployeesPanel
               organizationId={user.id}
               organizationName={organizationName}
             />
+
             <OrganizationDashboard
               opportunitiesRef={opportunitiesRef}
               userId={user.id}
@@ -205,13 +236,6 @@ export default function DashboardClient({
               orgStatus={profileStatus.orgStatus}
               organizationName={organizationName}
             />
-            {profileStatus.orgStatus === 'approved' && (
-              <OrgFundraisingPanel
-                orgStatus={profileStatus.orgStatus}
-                organizationName={organizationName}
-                myCampaigns={myCampaigns}
-              />
-            )}
           </>
         ) : role === 'donor' ? (
           <DonorDashboard

@@ -36,7 +36,8 @@ import {
   Lock,
   Download,
   Printer,
-  Copy
+  Copy,
+  Heart
 } from 'lucide-react'
 import ResubmitApplicationButton from '@/components/ui/ResubmitApplicationButton'
 import { 
@@ -1234,14 +1235,32 @@ export default function OrganizationDashboard({ opportunitiesRef, userId, userEm
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowAboutEditorModal(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors border-none cursor-pointer shrink-0"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            <span>{hasCreatedAbout ? 'Edit About Us & Profile' : '✨ Create About Us Page'}</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const btn = document.getElementById('raise-funds-btn')
+                if (btn) {
+                  btn.click()
+                  btn.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                } else {
+                  document.getElementById('org-fundraising-section')?.scrollIntoView({ behavior: 'smooth' })
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-xs shadow-xs transition-all border-none cursor-pointer"
+            >
+              <Heart className="w-3.5 h-3.5 text-rose-200 fill-rose-200" />
+              <span>Raise Funds</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAboutEditorModal(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-bold text-xs shadow-xs transition-colors border-none cursor-pointer"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>{hasCreatedAbout ? 'Edit About Us & Profile' : '✨ Create About Us Page'}</span>
+            </button>
+          </div>
         </div>
       )}
 
