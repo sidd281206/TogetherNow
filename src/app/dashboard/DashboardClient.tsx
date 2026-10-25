@@ -52,6 +52,8 @@ interface DashboardClientProps {
   donationRequests?: any[]
   donorStats?: { totalDonated: number; causesCount: number }
   myCampaigns?: any[]
+  myDonations?: any[]
+  incomingDonations?: any[]
   avatarUrl?: string
 }
 
@@ -63,6 +65,8 @@ export default function DashboardClient({
   donationRequests = [],
   donorStats = { totalDonated: 0, causesCount: 0 },
   myCampaigns = [],
+  myDonations = [],
+  incomingDonations = [],
   avatarUrl,
 }: DashboardClientProps) {
   const opportunitiesRef = useRef<OpportunitiesFeedRef | null>(null)
@@ -234,6 +238,7 @@ export default function DashboardClient({
                 orgStatus={profileStatus.orgStatus}
                 organizationName={organizationName}
                 myCampaigns={myCampaigns}
+                incomingDonations={incomingDonations}
               />
             </div>
 
@@ -258,6 +263,7 @@ export default function DashboardClient({
             userName={fullName}
             donationRequests={donationRequests}
             donorStats={donorStats}
+            myDonations={myDonations}
           />
         ) : (
           <VolunteerDashboard

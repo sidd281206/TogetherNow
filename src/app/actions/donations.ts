@@ -10,6 +10,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 export type DonationActionState = {
   errors?: Record<string, string[]>
   message?: string
+  success?: boolean
 } | null
 
 // ─── Create Donation Request (Organization) ───────────────────────────────────
@@ -170,13 +171,16 @@ export async function makeDonationAction(
   if (!donationRequestId) {
     errors.general = ['Invalid campaign selected.']
   }
+  if (!upiReference || upiReference.trim().length < 6) {
+    errors.upiReference = ['UPI Reference / UTR Number is mandatory to verify your payment.']
+  }
 
   if (Object.keys(errors).length > 0) return { errors }
 
   // Verify the donation request exists and is active
   const { data: request } = await supabase
     .from('donation_requests')
-    .select('id, organization_id, status')
+    .select('id, organization_id, organization_name, title, status')
     .eq('id', donationRequestId)
     .maybeSingle()
 
@@ -191,6 +195,7 @@ export async function makeDonationAction(
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   const adminClient = createAdminClient(supabaseUrl, serviceKey)
 
+  // Insert donation in 'pending' status until verified by organization
   let { error } = await adminClient.from('donations').insert({
     donor_id: user.id,
     organization_id: request.organization_id,
@@ -198,8 +203,8 @@ export async function makeDonationAction(
     amount,
     currency: 'INR',
     upi_id: upiId || null,
-    upi_txn_ref: upiReference || null,
-    status: 'completed',
+    upi_txn_ref: upiReference.trim(),
+    status: 'pending',
   })
 
   // If columns don't exist yet, retry with base columns
@@ -210,7 +215,7 @@ export async function makeDonationAction(
       donation_request_id: donationRequestId,
       amount,
       currency: 'INR',
-      status: 'completed',
+      status: 'pending',
     })
     error = fallbackRes.error
   }
@@ -221,7 +226,49 @@ export async function makeDonationAction(
   }
 
   revalidatePath('/dashboard')
-  return { message: `Thank you for your donation of ₹${amount.toLocaleString('en-IN')}! Your payment has been routed to the organization's verified UPI account. 💛` }
+  return { 
+    success: true,
+    message: `Payment submitted for verification! ⏳ Your payment of ₹${amount.toLocaleString('en-IN')} with UTR reference ${upiReference.trim()} has been forwarded to ${request.organization_name || 'the organization'}. Once verified against their bank statement, your donation receipt will be generated and available on your dashboard.`
+  }
+}
+
+// ─── Verify Donation (Organization) ───────────────────────────────────────────
+
+export async function verifyDonationAction(
+  donationId: string,
+  action: 'approve' | 'reject'
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) return { success: false, error: 'Not authenticated.' }
+
+  const role = user.user_metadata?.role ?? ''
+  if (role !== 'organization') {
+    return { success: false, error: 'Only organizations can verify donations.' }
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  const adminClient = createAdminClient(supabaseUrl, serviceKey)
+
+  const newStatus = action === 'approve' ? 'completed' : 'rejected'
+
+  const { error } = await adminClient
+    .from('donations')
+    .update({
+      status: newStatus,
+    })
+    .eq('id', donationId)
+    .eq('organization_id', user.id)
+
+  if (error) {
+    console.error('Error verifying donation:', error)
+    return { success: false, error: error.message }
+  }
+
+  revalidatePath('/dashboard')
+  return { success: true }
 }
 
 // ─── Close Campaign (Organization) ───────────────────────────────────────────

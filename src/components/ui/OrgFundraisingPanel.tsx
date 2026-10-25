@@ -20,9 +20,13 @@ import {
   QrCode,
   Copy,
   Check,
-  Edit2
+  Edit2,
+  XCircle,
+  FileCheck,
+  UserCheck,
+  RefreshCw
 } from 'lucide-react'
-import { createDonationRequestAction, closeCampaignAction } from '@/app/actions/donations'
+import { createDonationRequestAction, closeCampaignAction, verifyDonationAction } from '@/app/actions/donations'
 import { getOrganizationUpiId, setOrganizationUpiId } from '@/lib/organizations'
 
 interface Campaign {
@@ -36,10 +40,33 @@ interface Campaign {
   created_at: string
 }
 
+export interface IncomingDonation {
+  id: string
+  amount: number
+  currency: string
+  status: string
+  donated_at: string
+  donation_request_id?: string
+  organization_id: string
+  donor_id: string
+  upi_id?: string | null
+  upi_txn_ref?: string | null
+  donor_profile?: {
+    full_name?: string
+    email?: string
+  }
+  donation_requests?: {
+    id?: string
+    title?: string
+    cause_category?: string
+  }
+}
+
 interface OrgFundraisingPanelProps {
   orgStatus?: string
   organizationName?: string
   myCampaigns: Campaign[]
+  incomingDonations?: IncomingDonation[]
 }
 
 const CAUSE_CATEGORIES = [
@@ -349,10 +376,15 @@ export default function OrgFundraisingPanel({
   orgStatus,
   organizationName = 'Your Organization',
   myCampaigns = [],
+  incomingDonations = [],
 }: OrgFundraisingPanelProps) {
   const [showModal, setShowModal] = useState(false)
   const [closingId, setClosingId] = useState<string | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>(myCampaigns)
+  const [donationsList, setDonationsList] = useState<IncomingDonation[]>(incomingDonations)
+  const [activeTab, setActiveTab] = useState<'campaigns' | 'verifications' | 'verified_history'>('campaigns')
+  const [verifyingId, setVerifyingId] = useState<string | null>(null)
+  const [copiedUtrId, setCopiedUtrId] = useState<string | null>(null)
   const [orgUpiId, setOrgUpiId] = useState(() => getOrganizationUpiId(organizationName))
   const [isEditingUpi, setIsEditingUpi] = useState(false)
   const [editUpiVal, setEditUpiVal] = useState('')
@@ -361,6 +393,10 @@ export default function OrgFundraisingPanel({
   useEffect(() => {
     setCampaigns(myCampaigns)
   }, [myCampaigns])
+
+  useEffect(() => {
+    setDonationsList(incomingDonations)
+  }, [incomingDonations])
 
   useEffect(() => {
     const handleUpiUpdated = (e: any) => {
@@ -379,6 +415,12 @@ export default function OrgFundraisingPanel({
     setTimeout(() => setCopiedUpi(false), 2000)
   }
 
+  const handleCopyUtr = (utr: string, id: string) => {
+    navigator.clipboard.writeText(utr)
+    setCopiedUtrId(id)
+    setTimeout(() => setCopiedUtrId(null), 2000)
+  }
+
   const handleSaveUpi = () => {
     if (!editUpiVal.trim()) return
     const val = editUpiVal.trim()
@@ -391,6 +433,23 @@ export default function OrgFundraisingPanel({
   const totalRaised = campaigns.reduce((sum, c) => sum + Number(c.raised_amount || 0), 0)
   const totalGoal = campaigns.reduce((sum, c) => sum + Number(c.goal_amount || 0), 0)
   const activeCampaigns = campaigns.filter((c) => c.status === 'active')
+
+  const pendingDonations = donationsList.filter((d) => d.status === 'pending')
+  const verifiedDonations = donationsList.filter((d) => d.status === 'completed')
+
+  const handleVerify = async (id: string, action: 'approve' | 'reject') => {
+    if (action === 'reject' && !confirm('Are you sure you want to reject this payment record? The donor will be notified of invalid payment verification.')) {
+      return
+    }
+    setVerifyingId(id)
+    const res = await verifyDonationAction(id, action)
+    if (res.success) {
+      setDonationsList((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, status: action === 'approve' ? 'completed' : 'rejected' } : d))
+      )
+    }
+    setVerifyingId(null)
+  }
 
   const handleCloseCampaign = async (id: string) => {
     if (
@@ -531,8 +590,32 @@ export default function OrgFundraisingPanel({
         </div>
       </div>
 
+      {/* Pending Verifications Attention Banner */}
+      {pendingDonations.length > 0 && (
+        <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-3">
+            <span className="w-3 h-3 rounded-full bg-amber-500 animate-ping shrink-0" />
+            <div>
+              <p className="text-xs font-black text-amber-900 dark:text-amber-200 m-0">
+                Action Required: {pendingDonations.length} Donation Payment{pendingDonations.length > 1 ? 's' : ''} Awaiting Your Verification
+              </p>
+              <p className="text-[11px] text-amber-800/90 dark:text-amber-300/90 m-0 mt-0.5">
+                Donors have submitted their UPI UTR reference numbers. Verify credit in your bank app and approve to unlock their tax receipt.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('verifications')}
+            className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs border-none cursor-pointer shrink-0 transition-colors shadow-xs"
+          >
+            Review {pendingDonations.length} Pending
+          </button>
+        </div>
+      )}
+
       {/* Metric Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3.5">
         <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/40 flex items-center gap-3.5">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
             <Wallet className="w-5 h-5" />
@@ -567,130 +650,357 @@ export default function OrgFundraisingPanel({
           </div>
           <div>
             <div className="text-xs font-bold text-indigo-800 dark:text-indigo-300">
-              Campaigns
+              Active Campaigns
             </div>
             <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white leading-tight">
-              {campaigns.length} Total ({activeCampaigns.length} Active)
+              {activeCampaigns.length} ({campaigns.length} total)
+            </div>
+          </div>
+        </div>
+
+        <div 
+          onClick={() => setActiveTab('verifications')}
+          className={`p-4 rounded-2xl border flex items-center gap-3.5 cursor-pointer transition-all ${
+            pendingDonations.length > 0 
+              ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 shadow-xs' 
+              : 'bg-gray-50/60 dark:bg-gray-800/40 border-gray-200 dark:border-gray-700'
+          }`}
+        >
+          <div className={`w-10 h-10 rounded-xl text-white flex items-center justify-center shrink-0 shadow-2xs ${
+            pendingDonations.length > 0 ? 'bg-gradient-to-br from-amber-500 to-orange-600' : 'bg-gray-400'
+          }`}>
+            <FileCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <div className={`text-xs font-bold ${pendingDonations.length > 0 ? 'text-amber-800 dark:text-amber-300' : 'text-gray-500'}`}>
+              Pending Verifications
+            </div>
+            <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white leading-tight flex items-center gap-2">
+              <span>{pendingDonations.length}</span>
+              {pendingDonations.length > 0 && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-white font-extrabold uppercase animate-pulse">
+                  Review
+                </span>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Campaigns Listing */}
-      {campaigns.length === 0 ? (
-        <div className="text-center py-10 px-4 bg-gray-50/70 dark:bg-gray-800/40 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-500 mx-auto flex items-center justify-center text-xl shadow-2xs">
-            <Heart className="w-6 h-6 fill-rose-500 text-rose-500" />
-          </div>
-          <div>
-            <h4 className="text-sm font-extrabold text-gray-900 dark:text-white m-0">
-              No fundraising campaigns yet
-            </h4>
-            <p className="text-xs text-gray-500 dark:text-gray-400 m-0 mt-1 max-w-md mx-auto">
-              {isApproved
-                ? 'Launch your first campaign today to receive contributions from donors interested in your cause.'
-                : 'Complete organization verification to start raising funds for your initiatives.'}
-            </p>
-          </div>
-          {isApproved && (
-            <button
-              type="button"
-              onClick={() => setShowModal(true)}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold transition-colors border-none cursor-pointer"
-            >
-              Launch First Campaign
-            </button>
+      {/* Navigation Tabs */}
+      <div className="flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 pb-2 overflow-x-auto no-scrollbar">
+        <button
+          type="button"
+          onClick={() => setActiveTab('campaigns')}
+          className={`px-4 py-2 rounded-xl text-xs font-black transition-all border-none cursor-pointer flex items-center gap-2 ${
+            activeTab === 'campaigns'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white bg-transparent'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>Active Campaigns ({campaigns.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('verifications')}
+          className={`px-4 py-2 rounded-xl text-xs font-black transition-all border-none cursor-pointer flex items-center gap-2 relative ${
+            activeTab === 'verifications'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white bg-transparent'
+          }`}
+        >
+          <FileCheck className="w-3.5 h-3.5" />
+          <span>Verify UTR Payments</span>
+          {pendingDonations.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black">
+              {pendingDonations.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('verified_history')}
+          className={`px-4 py-2 rounded-xl text-xs font-black transition-all border-none cursor-pointer flex items-center gap-2 ${
+            activeTab === 'verified_history'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white bg-transparent'
+          }`}
+        >
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          <span>Verified History ({verifiedDonations.length})</span>
+        </button>
+      </div>
+
+      {/* TAB 1: CAMPAIGNS LISTING */}
+      {activeTab === 'campaigns' && (
+        <>
+          {campaigns.length === 0 ? (
+            <div className="text-center py-10 px-4 bg-gray-50/70 dark:bg-gray-800/40 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-500 mx-auto flex items-center justify-center text-xl shadow-2xs">
+                <Heart className="w-6 h-6 fill-rose-500 text-rose-500" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold text-gray-900 dark:text-white m-0">
+                  No fundraising campaigns yet
+                </h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 m-0 mt-1 max-w-md mx-auto">
+                  {isApproved
+                    ? 'Launch your first campaign today to receive contributions from donors interested in your cause.'
+                    : 'Complete organization verification to start raising funds for your initiatives.'}
+                </p>
+              </div>
+              {isApproved && (
+                <button
+                  type="button"
+                  onClick={() => setShowModal(true)}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold transition-colors border-none cursor-pointer"
+                >
+                  Launch First Campaign
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              {campaigns.map((campaign) => {
+                const raised = Number(campaign.raised_amount || 0)
+                const goal = Number(campaign.goal_amount || 1)
+                const progress = Math.min(100, Math.round((raised / goal) * 100))
+                const isActive = campaign.status === 'active'
+
+                return (
+                  <div
+                    key={campaign.id}
+                    className={`p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
+                      isActive
+                        ? 'bg-white dark:bg-gray-800/80 border-gray-200 dark:border-gray-700 shadow-xs hover:border-emerald-300 dark:hover:border-emerald-700'
+                        : 'bg-gray-50/70 dark:bg-gray-800/30 border-gray-200 dark:border-gray-800 opacity-70'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-extrabold text-sm text-gray-900 dark:text-white m-0 truncate">
+                            {campaign.title}
+                          </h4>
+                          <span
+                            className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                              isActive
+                                ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                            }`}
+                          >
+                            {isActive ? '● Active' : 'Closed'}
+                          </span>
+                        </div>
+                        <span className="inline-block text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                          {campaign.cause_category}
+                        </span>
+                      </div>
+
+                      {isActive && (
+                        <button
+                          id={`close-campaign-${campaign.id}`}
+                          type="button"
+                          onClick={() => handleCloseCampaign(campaign.id)}
+                          disabled={closingId === campaign.id}
+                          title="Close this campaign"
+                          className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 text-[11px] font-bold border border-rose-200 dark:border-rose-900 transition-colors cursor-pointer shrink-0 flex items-center gap-1"
+                        >
+                          <Archive className="w-3 h-3" />
+                          <span>{closingId === campaign.id ? '...' : 'Close'}</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between text-xs font-semibold">
+                        <span className="text-gray-900 dark:text-white font-black">
+                          ₹{raised.toLocaleString('en-IN')} raised
+                        </span>
+                        <span className="text-gray-500 dark:text-gray-400 text-[11px]">
+                          {progress}% of ₹{goal.toLocaleString('en-IN')}
+                        </span>
+                      </div>
+
+                      <div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-amber-400 to-emerald-500 rounded-full transition-all duration-500"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Deadline */}
+                    {campaign.deadline && (
+                      <div className="text-[11px] text-gray-400 dark:text-gray-500 flex items-center gap-1 pt-1 border-t border-gray-100 dark:border-gray-800">
+                        <Calendar className="w-3 h-3 text-gray-400" />
+                        <span>
+                          Deadline:{' '}
+                          {new Date(campaign.deadline).toLocaleDateString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* TAB 2: PENDING PAYMENT VERIFICATIONS */}
+      {activeTab === 'verifications' && (
+        <div className="space-y-3.5">
+          {pendingDonations.length === 0 ? (
+            <div className="text-center py-12 px-4 bg-gray-50/70 dark:bg-gray-800/40 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 space-y-2">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 mx-auto flex items-center justify-center text-xl shadow-2xs">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <h4 className="text-sm font-extrabold text-gray-900 dark:text-white m-0">
+                All Caught Up!
+              </h4>
+              <p className="text-xs text-gray-500 dark:text-gray-400 m-0 max-w-sm mx-auto">
+                No pending donation payment submissions right now. When donors transfer funds via UPI and enter their mandatory UTR number, you will verify and unlock their tax receipts here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pendingDonations.map((donation) => {
+                const isProcessing = verifyingId === donation.id
+                const donorName = donation.donor_profile?.full_name || 'Community Donor'
+                const donorEmail = donation.donor_profile?.email || ''
+                const campaignTitle = donation.donation_requests?.title || 'Fundraising Initiative'
+
+                return (
+                  <div
+                    key={donation.id}
+                    className="p-5 rounded-2xl bg-white dark:bg-gray-800 border border-amber-200 dark:border-amber-800/80 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-2 min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                          <Clock className="w-3 h-3" /> Awaiting Bank Verification
+                        </span>
+                        <span className="text-xs text-gray-400">•</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          {new Date(donation.donated_at).toLocaleString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                          ₹{Number(donation.amount).toLocaleString('en-IN')}
+                        </span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          contributed for <strong>{campaignTitle}</strong>
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs text-gray-600 dark:text-gray-300">
+                        <span className="flex items-center gap-1.5 font-bold">
+                          <UserCheck className="w-3.5 h-3.5 text-gray-400" />
+                          {donorName} {donorEmail && <span className="text-gray-400 font-normal">({donorEmail})</span>}
+                        </span>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-gray-400 font-semibold">Mandatory UTR:</span>
+                          <code className="px-2.5 py-0.5 rounded bg-amber-100/70 dark:bg-amber-950 font-mono font-black text-amber-900 dark:text-amber-200 text-xs">
+                            {donation.upi_txn_ref || 'N/A'}
+                          </code>
+                          {donation.upi_txn_ref && (
+                            <button
+                              type="button"
+                              onClick={() => handleCopyUtr(donation.upi_txn_ref!, donation.id)}
+                              className="text-gray-400 hover:text-emerald-600 border-none bg-transparent cursor-pointer p-0.5"
+                              title="Copy UTR to verify in banking app"
+                            >
+                              {copiedUtrId === donation.id ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Verification Actions */}
+                    <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+                      <button
+                        type="button"
+                        disabled={isProcessing}
+                        onClick={() => handleVerify(donation.id, 'reject')}
+                        className="px-3.5 py-2 rounded-xl bg-gray-100 hover:bg-rose-50 dark:bg-gray-700 dark:hover:bg-rose-950/60 text-gray-600 hover:text-rose-600 dark:text-gray-300 dark:hover:text-rose-400 font-bold text-xs transition-colors border-none cursor-pointer flex items-center gap-1.5"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Reject</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isProcessing}
+                        onClick={() => handleVerify(donation.id, 'approve')}
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-xs transition-all shadow-md hover:shadow-lg border-none cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>{isProcessing ? 'Verifying...' : 'Verify & Approve Payment'}</span>
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-          {campaigns.map((campaign) => {
-            const raised = Number(campaign.raised_amount || 0)
-            const goal = Number(campaign.goal_amount || 1)
-            const progress = Math.min(100, Math.round((raised / goal) * 100))
-            const isActive = campaign.status === 'active'
+      )}
 
-            return (
-              <div
-                key={campaign.id}
-                className={`p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
-                  isActive
-                    ? 'bg-white dark:bg-gray-800/80 border-gray-200 dark:border-gray-700 shadow-xs hover:border-emerald-300 dark:hover:border-emerald-700'
-                    : 'bg-gray-50/70 dark:bg-gray-800/30 border-gray-200 dark:border-gray-800 opacity-70'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1 min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="font-extrabold text-sm text-gray-900 dark:text-white m-0 truncate">
-                        {campaign.title}
-                      </h4>
-                      <span
-                        className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-                          isActive
-                            ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                        }`}
-                      >
-                        {isActive ? '● Active' : 'Closed'}
+      {/* TAB 3: VERIFIED RECEIPTS & HISTORY */}
+      {activeTab === 'verified_history' && (
+        <div className="space-y-3">
+          {verifiedDonations.length === 0 ? (
+            <div className="text-center py-10 px-4 bg-gray-50/70 dark:bg-gray-800/40 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 space-y-2">
+              <p className="text-xs text-gray-500 dark:text-gray-400 m-0">
+                No verified donation receipts yet. When you verify donor payments, they will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {verifiedDonations.map((donation) => (
+                <div
+                  key={donation.id}
+                  className="p-4 rounded-xl bg-white dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3 text-xs"
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-extrabold text-sm text-gray-900 dark:text-white">
+                        ₹{Number(donation.amount).toLocaleString('en-IN')}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Verified &amp; Credited
                       </span>
                     </div>
-                    <span className="inline-block text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                      {campaign.cause_category}
-                    </span>
+                    <p className="text-gray-500 dark:text-gray-400 m-0 text-[11px]">
+                      From <strong>{donation.donor_profile?.full_name || 'Donor'}</strong> • UTR: {donation.upi_txn_ref || 'N/A'} • {new Date(donation.donated_at).toLocaleDateString('en-IN')}
+                    </p>
                   </div>
-
-                  {isActive && (
-                    <button
-                      id={`close-campaign-${campaign.id}`}
-                      type="button"
-                      onClick={() => handleCloseCampaign(campaign.id)}
-                      disabled={closingId === campaign.id}
-                      title="Close this campaign"
-                      className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 text-[11px] font-bold border border-rose-200 dark:border-rose-900 transition-colors cursor-pointer shrink-0 flex items-center gap-1"
-                    >
-                      <Archive className="w-3 h-3" />
-                      <span>{closingId === campaign.id ? '...' : 'Close'}</span>
-                    </button>
-                  )}
+                  <span className="text-[11px] font-mono text-gray-400">
+                    Receipt #{donation.id.slice(0, 8).toUpperCase()}
+                  </span>
                 </div>
-
-                {/* Progress bar */}
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex items-center justify-between text-xs font-semibold">
-                    <span className="text-gray-900 dark:text-white font-black">
-                      ₹{raised.toLocaleString('en-IN')} raised
-                    </span>
-                    <span className="text-gray-500 dark:text-gray-400 text-[11px]">
-                      {progress}% of ₹{goal.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-
-                  <div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-amber-400 to-emerald-500 rounded-full transition-all duration-500"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Deadline */}
-                {campaign.deadline && (
-                  <div className="text-[11px] text-gray-400 dark:text-gray-500 flex items-center gap-1 pt-1 border-t border-gray-100 dark:border-gray-800">
-                    <Calendar className="w-3 h-3 text-gray-400" />
-                    <span>
-                      Deadline:{' '}
-                      {new Date(campaign.deadline).toLocaleDateString('en-IN', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                      })}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )
-          })}
+              ))}
+            </div>
+          )}
         </div>
       )}
 

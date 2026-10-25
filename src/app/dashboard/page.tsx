@@ -163,8 +163,9 @@ export default async function DashboardPage() {
     organizationName = profileRow?.full_name || user.user_metadata?.full_name || undefined
   }
 
-  // Fetch donation requests for donor dashboard
+  // Fetch donation requests & history for donor dashboard
   let donationRequests: any[] = []
+  let myDonations: any[] = []
   let donorStats: { totalDonated: number; causesCount: number } = { totalDonated: 0, causesCount: 0 }
   if (role === 'donor') {
     const { data: requests } = await supabase
@@ -174,18 +175,40 @@ export default async function DashboardPage() {
       .order('created_at', { ascending: false })
     donationRequests = requests ?? []
 
-    const { data: myDonations } = await supabase
+    const { data: userDonations } = await supabase
       .from('donations')
-      .select('amount, donation_request_id')
+      .select(`
+        id,
+        amount,
+        currency,
+        status,
+        donated_at,
+        donation_request_id,
+        organization_id,
+        upi_id,
+        upi_txn_ref,
+        donation_requests (
+          id,
+          title,
+          cause_category,
+          organization_name,
+          upi_id
+        )
+      `)
       .eq('donor_id', user.id)
+      .order('donated_at', { ascending: false })
+    myDonations = userDonations ?? []
+
+    const completed = myDonations.filter(d => d.status === 'completed')
     donorStats = {
-      totalDonated: myDonations?.reduce((s, d) => s + Number(d.amount), 0) ?? 0,
-      causesCount: new Set(myDonations?.map(d => d.donation_request_id).filter(Boolean)).size,
+      totalDonated: completed.reduce((s, d) => s + Number(d.amount), 0),
+      causesCount: new Set(completed.map(d => d.donation_request_id).filter(Boolean)).size,
     }
   }
 
-  // Fetch org's own campaigns
+  // Fetch org's own campaigns & incoming donations for verification
   let myCampaigns: any[] = []
+  let incomingDonations: any[] = []
   if (role === 'organization' && orgStatus === 'approved') {
     const { data: campaigns } = await supabase
       .from('donation_requests')
@@ -193,6 +216,45 @@ export default async function DashboardPage() {
       .eq('organization_id', user.id)
       .order('created_at', { ascending: false })
     myCampaigns = campaigns ?? []
+
+    const { data: orgDonations } = await supabase
+      .from('donations')
+      .select(`
+        id,
+        amount,
+        currency,
+        status,
+        donated_at,
+        donation_request_id,
+        organization_id,
+        donor_id,
+        upi_id,
+        upi_txn_ref,
+        donation_requests (
+          id,
+          title,
+          cause_category
+        )
+      `)
+      .eq('organization_id', user.id)
+      .order('donated_at', { ascending: false })
+
+    if (orgDonations && orgDonations.length > 0) {
+      const donorIds = Array.from(new Set(orgDonations.map(d => d.donor_id).filter(Boolean)))
+      if (donorIds.length > 0) {
+        const { data: donorProfiles } = await supabase
+          .from('profiles')
+          .select('id, full_name, email')
+          .in('id', donorIds)
+        const profileMap = new Map((donorProfiles || []).map(p => [p.id, p]))
+        incomingDonations = orgDonations.map(d => ({
+          ...d,
+          donor_profile: profileMap.get(d.donor_id) || { full_name: 'Community Donor', email: '' }
+        }))
+      } else {
+        incomingDonations = orgDonations
+      }
+    }
   }
 
   const profileStatus = {
@@ -212,6 +274,8 @@ export default async function DashboardPage() {
       donationRequests={donationRequests}
       donorStats={donorStats}
       myCampaigns={myCampaigns}
+      myDonations={myDonations}
+      incomingDonations={incomingDonations}
       avatarUrl={avatarUrl}
     />
   )
