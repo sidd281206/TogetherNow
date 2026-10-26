@@ -171,8 +171,11 @@ export async function makeDonationAction(
   if (!donationRequestId) {
     errors.general = ['Invalid campaign selected.']
   }
-  if (!upiReference || upiReference.trim().length < 6) {
+  const cleanUtr = upiReference.replace(/\s+/g, '')
+  if (!cleanUtr) {
     errors.upiReference = ['UPI Reference / UTR Number is mandatory to verify your payment.']
+  } else if (!/^\d{12}$/.test(cleanUtr)) {
+    errors.upiReference = ['UTR Number must be exactly 12 numeric digits (no letters or special characters).']
   }
 
   if (Object.keys(errors).length > 0) return { errors }
@@ -203,7 +206,7 @@ export async function makeDonationAction(
     amount,
     currency: 'INR',
     upi_id: upiId || null,
-    upi_txn_ref: upiReference.trim(),
+    upi_txn_ref: cleanUtr,
     status: 'pending',
   })
 
@@ -228,7 +231,7 @@ export async function makeDonationAction(
   revalidatePath('/dashboard')
   return { 
     success: true,
-    message: `Payment submitted for verification! ⏳ Your payment of ₹${amount.toLocaleString('en-IN')} with UTR reference ${upiReference.trim()} has been forwarded to ${request.organization_name || 'the organization'}. Once verified against their bank statement, your donation receipt will be generated and available on your dashboard.`
+    message: `Payment submitted for verification! ⏳ Your payment of ₹${amount.toLocaleString('en-IN')} with UTR reference ${cleanUtr} has been forwarded to ${request.organization_name || 'the organization'}. Once verified against their bank statement, your donation receipt will be generated and available on your dashboard.`
   }
 }
 

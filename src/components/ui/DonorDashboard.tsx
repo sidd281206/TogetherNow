@@ -677,6 +677,7 @@ function DonateModal({
   }
 
   const numAmount = parseFloat(amount) || 0
+  const isUtrValid = /^\d{12}$/.test(upiReference.trim())
   const upiDeepLink = numAmount >= 10
     ? `upi://pay?pa=${encodeURIComponent(orgUpiId)}&pn=${encodeURIComponent(campaign.organization_name)}&am=${numAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent('Donation for ' + campaign.title.slice(0, 45))}`
     : ''
@@ -1048,36 +1049,74 @@ function DonateModal({
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.78rem', fontWeight: 800, color: '#1e293b', marginBottom: '6px' }}
                 >
                   <span>UPI Reference / UTR Number <span style={{ color: '#dc2626' }}>*</span></span>
-                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#059669', backgroundColor: '#ecfdf5', padding: '1px 6px', borderRadius: '4px' }}>
-                    Mandatory for Verification
+                  <span style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    color: isUtrValid ? '#047857' : '#059669',
+                    backgroundColor: isUtrValid ? '#d1fae5' : '#ecfdf5',
+                    padding: '1px 8px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.15s',
+                  }}>
+                    {isUtrValid ? '✓ 12/12 Digits' : `${upiReference.length}/12 Digits`}
                   </span>
                 </label>
-                <input
-                  id="donate-upi-ref"
-                  name="upiReference"
-                  type="text"
-                  required
-                  minLength={6}
-                  value={upiReference}
-                  onChange={e => setUpiReference(e.target.value)}
-                  placeholder="Enter 12-digit UTR from Google Pay / PhonePe / Paytm"
-                  style={{
-                    width: '100%',
-                    padding: '11px 14px',
-                    borderRadius: '12px',
-                    border: state?.errors?.upiReference ? '2px solid #f87171' : '1.5px solid #cbd5e1',
-                    fontSize: '0.85rem',
-                    fontFamily: 'monospace',
-                    fontWeight: 700,
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                    color: '#0f172a',
-                    letterSpacing: '0.04em',
-                  }}
-                />
-                <p style={{ margin: '4px 0 0', fontSize: '0.72rem', color: '#64748b' }}>
-                  Find this in your payment app transaction details after sending the money.
-                </p>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    id="donate-upi-ref"
+                    name="upiReference"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    required
+                    maxLength={12}
+                    value={upiReference}
+                    onChange={e => {
+                      // Accept only numbers and limit to 12 digits
+                      const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 12)
+                      setUpiReference(digitsOnly)
+                    }}
+                    placeholder="Enter 12-digit numeric UTR (e.g. 402812345678)"
+                    style={{
+                      width: '100%',
+                      padding: '11px 40px 11px 14px',
+                      borderRadius: '12px',
+                      border: state?.errors?.upiReference
+                        ? '2px solid #f87171'
+                        : isUtrValid
+                        ? '2px solid #10b981'
+                        : '1.5px solid #cbd5e1',
+                      fontSize: '0.9rem',
+                      fontFamily: 'monospace',
+                      fontWeight: 700,
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                      color: '#0f172a',
+                      letterSpacing: '0.06em',
+                      backgroundColor: isUtrValid ? '#f0fdf4' : '#ffffff',
+                      transition: 'border 0.15s, background-color 0.15s',
+                    }}
+                  />
+                  {isUtrValid && (
+                    <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', pointerEvents: 'none' }}>
+                      <CheckCircle2 style={{ width: '18px', height: '18px', color: '#10b981' }} />
+                    </div>
+                  )}
+                </div>
+
+                {upiReference.length > 0 && !isUtrValid && (
+                  <p style={{ margin: '4px 0 0', fontSize: '0.72rem', color: '#d97706', fontWeight: 600 }}>
+                    Enter all 12 numeric digits ({12 - upiReference.length} remaining)
+                  </p>
+                )}
+                {upiReference.length === 0 && (
+                  <p style={{ margin: '4px 0 0', fontSize: '0.72rem', color: '#64748b' }}>
+                    Only numbers allowed. Find the 12-digit UTR in Google Pay / PhonePe / Paytm transaction details.
+                  </p>
+                )}
                 {state?.errors?.upiReference && (
                   <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: '#dc2626', fontWeight: 600 }}>
                     {state.errors.upiReference[0]}
@@ -1089,25 +1128,25 @@ function DonateModal({
               <button
                 id="donate-submit"
                 type="submit"
-                disabled={pending || numAmount < 10 || !upiReference.trim() || upiReference.trim().length < 6}
+                disabled={pending || numAmount < 10 || !isUtrValid}
                 style={{
                   width: '100%',
                   padding: '14px',
                   borderRadius: '16px',
-                  background: (numAmount < 10 || pending || !upiReference.trim() || upiReference.trim().length < 6)
+                  background: (numAmount < 10 || pending || !isUtrValid)
                     ? '#cbd5e1'
                     : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                  color: (numAmount < 10 || pending || !upiReference.trim() || upiReference.trim().length < 6) ? '#64748b' : '#ffffff',
+                  color: (numAmount < 10 || pending || !isUtrValid) ? '#64748b' : '#ffffff',
                   fontSize: '0.92rem',
                   fontWeight: 900,
                   border: 'none',
-                  cursor: (numAmount < 10 || pending || !upiReference.trim() || upiReference.trim().length < 6) ? 'not-allowed' : 'pointer',
+                  cursor: (numAmount < 10 || pending || !isUtrValid) ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '8px',
                   transition: 'all 0.15s',
-                  boxShadow: numAmount >= 10 && !pending && upiReference.trim().length >= 6 ? '0 8px 24px rgba(16, 185, 129, 0.35)' : 'none',
+                  boxShadow: numAmount >= 10 && !pending && isUtrValid ? '0 8px 24px rgba(16, 185, 129, 0.35)' : 'none',
                 }}
               >
                 <CheckCircle2 style={{ width: '18px', height: '18px' }} />
@@ -1116,8 +1155,10 @@ function DonateModal({
                     ? 'Submitting for Verification...'
                     : numAmount < 10
                     ? 'Enter Donation Amount'
-                    : !upiReference.trim() || upiReference.trim().length < 6
-                    ? 'Enter UTR to Submit Payment'
+                    : !upiReference.trim()
+                    ? 'Enter 12-Digit UTR to Submit Payment'
+                    : !isUtrValid
+                    ? `Enter Full 12-Digit UTR (${upiReference.length}/12)`
                     : `I Have Paid ₹${numAmount.toLocaleString('en-IN')} • Submit for Verification`}
                 </span>
               </button>

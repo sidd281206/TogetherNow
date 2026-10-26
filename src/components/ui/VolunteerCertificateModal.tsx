@@ -45,17 +45,17 @@ export default function VolunteerCertificateModal({
   const rawDate = opportunity?.date || applicant.attendanceMarkedAt
   const formattedEventDate = rawDate
     ? new Date(rawDate).toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'long',
-        year: 'numeric',
-      })
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    })
     : 'Completed Drive'
   const markedAtDate = applicant.attendanceMarkedAt
     ? new Date(applicant.attendanceMarkedAt).toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'long',
-        year: 'numeric',
-      })
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    })
     : formattedEventDate
 
   useEffect(() => {
